@@ -1,0 +1,27 @@
+services:
+  # ─── Frontend (Static Site) ─────────────────────────────────────────────────
+  - type: web
+    name: vms-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: true
+    routes:
+      # SPA fallback: every path serves index.html so React Router works
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  # ─── Backend (Node.js Web Service) ──────────────────────────────────────────
+  - type: web
+    name: vms-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install && npx prisma generate
+    startCommand: node src/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22.16.0

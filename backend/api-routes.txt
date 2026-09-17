@@ -1,0 +1,2834 @@
+================================================================================
+VMS (VENDOR MANAGEMENT SYSTEM) - API TESTING SPECIFICATION & MANUAL
+================================================================================
+Document Version: 2.0.0
+Refactored At: 2026-06-30
+Target Host: http://localhost:5000
+Prisma Client Version: 7.8.0
+Express Engine: 5.2.1
+
+This document is the Single Source of Truth (SSoT) for all backend APIs.
+It details every endpoint registered in Express, validation schemas, controllers,
+services, and step-by-step verification flows.
+
+////////////////////////////////////////////////////////////////////////////////
+GLOBAL SPECIFICATIONS
+////////////////////////////////////////////////////////////////////////////////
+
+AUTHENTICATION & TOKEN MATRIX
+-----------------------------
+All protected APIs require a JSON Web Token (JWT) in the Authorization header.
+Header format:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+
+ROLES & HIERARCHY
+-----------------
+* SUPER_ADMIN   : Complete system control, user CRUD, toggle status, bypass actions.
+* CASE_MANAGER  : Creator role for Vendors, POs, Invoices, and Payments. Can only access own records.
+* TEAM_LEAD     : Approves Invoices where Amount <= 10,000 INR, or first level for larger amounts.
+* MANAGER       : Approves Invoices where Amount <= 100,000 INR (secondary level).
+* FINANCE_HEAD  : Approves Invoices where Amount > 100,000 INR (final level). Merged from former L3 + Finance Head. Authorized to record remarks.
+
+STANDARD ERROR RESPONSES
+------------------------
+
+1. Validation Error (Status: 400 Bad Request)
+{
+  "success": false,
+  "status": 400,
+  "message": "Validation failed: <Zod validation issues>"
+}
+Note: The validation middleware includes a safe fallback default `|| {}` for all wrapper objects (body, query, params) to avoid the generic "expected object, received undefined" type crash, ensuring specific validation issues are always returned in the JSON payload.
+
+2. Unauthorized Error (Status: 401 Unauthorized)
+{
+  "success": false,
+  "status": 401,
+  "message": "Unauthorized"
+}
+
+3. Forbidden Error (Status: 403 Forbidden)
+{
+  "success": false,
+  "status": 403,
+  "message": "Forbidden"
+}
+
+4. Not Found Error (Status: 404 Not Found)
+{
+  "success": false,
+  "status": 404,
+  "message": "Resource not found"
+}
+
+5. Conflict Error (Status: 409 Conflict)
+{
+  "success": false,
+  "status": 409,
+  "message": "Resource already exists."
+}
+
+6. Internal Server Error (Status: 500 Internal Server Error)
+{
+  "success": false,
+  "status": 500,
+  "message": "Internal Server Error"
+}
+
+======================================================
+MODULE : AUTHENTICATION
+=======================
+Description: Handles user authentication, session refresh, profile queries,
+             password modifications, and self-service password recovery workflows.
+Purpose: Secure the system and allow users to authenticate and recover passwords.
+Required Role: All roles (Public endpoints exist)
+Required Authentication: Partial (Profile & Change Password require JWT)
+Database Tables Used: users
+Prisma Models Used: User
+Controller: src/modules/auth/auth.controller.js
+Service: src/modules/auth/auth.service.js
+Repository: src/modules/users/user.repository.js
+Validation Files: src/zodSchema/auth.schema.js
+Middleware Used: validate.middleware.js, auth.middleware.js, authorize.middleware.js
+File Upload Middleware: None
+
+////////////////////////////////////////////////////
+AUTHENTICATION MODULE - APIS
+////////////////////////////////////////////////////
+
+---
+## USER LOGIN
+---
+* API Name: User Authentication / Login
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/auth/login
+* Description: Authenticate using email and password to receive JWT tokens.
+* Bearer Token Required: NO
+* Role Required: None (Public)
+* Required Headers:
+  Content-Type: application/json
+* URL Parameters: None
+* Query Parameters: None
+* Complete Request Body:
+{
+  "email": "admin@vms.com",
+  "password": "Admin@123"
+}
+  * Validation Rules:
+    - email: Required, string, valid email format, trimmed, lowercased
+    - password: Required, string, minimum length 8, complex character constraints
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Login successful.",
+  "data": {
+    "user": {
+      "id": "78326a27-0245-42f0-94eb-b6732be3ff81",
+      "email": "admin@vms.com",
+      "role": "SUPER_ADMIN",
+      "first_name": "System",
+      "last_name": "Admin",
+      "is_active": true,
+      "last_login_at": "2026-06-30T10:15:00.000Z",
+      "created_at": "2026-06-30T10:10:00.000Z"
+    },
+    "accessToken": "eyJhbGciOiJIUzI1NiIsIn...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIsIn..."
+  }
+}
+* Business Logic: Validate credentials. Hash check using bcrypt. Generate access/refresh tokens. Record last_login_at and refresh_token in database.
+  - Controller Function: login()
+  - Service Function: authService.login()
+  - Repository Function: userRepository.findByEmail(), userRepository.updateUser()
+  - Database Operation: findUnique, update
+* cURL Request:
+curl -X POST http://localhost:5000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@vms.com", "password": "Admin@123"}'
+* Postman Request: POST http://localhost:5000/api/v1/auth/login with raw JSON body
+* Thunder Client Request: POST http://localhost:5000/api/v1/auth/login with raw JSON body
+* Axios Example:
+axios.post('http://localhost:5000/api/v1/auth/login', {
+  email: 'admin@vms.com',
+  password: 'Admin@123'
+}).then(res => console.log(res.data));
+* Fetch API Example:
+fetch('http://localhost:5000/api/v1/auth/login', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ email: 'admin@vms.com', password: 'Admin@123' })
+}).then(res => res.json()).then(console.log);
+* Expected Status Codes: 200 (Success), 400 (Bad request payload), 401 (Invalid credentials)
+
+---
+## FORGOT PASSWORD
+---
+* API Name: Forgot Password (OTP Request)
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/auth/forgot-password
+* Description: Triggers a password recovery email with a 6-digit verification code.
+* Bearer Token Required: NO
+* Role Required: None (Public)
+* Required Headers:
+  Content-Type: application/json
+* Complete Request Body:
+{
+  "email": "case.manager@vms.com"
+}
+  * Validation Rules:
+    - email: Required, string, valid email format
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "If that email exists in our system, we have sent a reset code."
+}
+* Business Logic: Retrieve user. Generate 6-digit random number. Set expiry to 10 minutes from now. Store to database. Send email containing HTML with OTP.
+  - Controller Function: forgotPassword()
+  - Service Function: authService.forgotPassword()
+  - Repository Function: userRepository.findByEmail(), userRepository.updateUser()
+  - Database Operation: findUnique, update
+* cURL Request:
+curl -X POST http://localhost:5000/api/v1/auth/forgot-password \
+  -H "Content-Type: application/json" \
+  -d '{"email": "case.manager@vms.com"}'
+* Expected Status Codes: 200 (Success, standard format even for non-existent users for security)
+
+---
+## VERIFY OTP
+---
+* API Name: Verify Password Reset OTP
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/auth/verify-otp
+* Description: Verifies that the recovery OTP matches and has not expired.
+* Bearer Token Required: NO
+* Role Required: None (Public)
+* Required Headers:
+  Content-Type: application/json
+* Complete Request Body:
+{
+  "email": "case.manager@vms.com",
+  "otp": "123456"
+}
+  * Validation Rules:
+    - email: Required, string, valid email
+    - otp: Required, string, length 6, numeric format
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "OTP verified"
+}
+* Business Logic: Match active user by email and OTP. Throw error if token expired or mismatch.
+  - Controller Function: verifyOtp()
+  - Service Function: authService.verifyOtp()
+  - Repository Function: userRepository.findByResetOtp()
+  - Database Operation: findFirst
+* cURL Request:
+curl -X POST http://localhost:5000/api/v1/auth/verify-otp \
+  -H "Content-Type: application/json" \
+  -d '{"email": "case.manager@vms.com", "otp": "123456"}'
+* Expected Status Codes: 200 (Success), 400 (Invalid or expired OTP)
+
+---
+## RESET PASSWORD
+---
+* API Name: Reset Password via OTP
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/auth/reset-password
+* Description: Submits a new password along with email and verified OTP.
+* Bearer Token Required: NO
+* Role Required: None (Public)
+* Required Headers:
+  Content-Type: application/json
+* Complete Request Body:
+{
+  "email": "case.manager@vms.com",
+  "otp": "123456",
+  "newPassword": "NewPassword@123"
+}
+  * Validation Rules:
+    - email: Required, string, valid email
+    - otp: Required, string, length 6
+    - newPassword: Required, string, min 8 characters, must contain 1 uppercase, 1 lowercase, 1 digit, and 1 special character
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Password reset successfully."
+}
+* Business Logic: Verify validity of OTP again. Hash new password using bcrypt. Update user entity. Nullify password_reset_otp and password_reset_otp_expires.
+  - Controller Function: resetPassword()
+  - Service Function: authService.resetPassword()
+  - Repository Function: userRepository.findByResetOtp(), userRepository.updateUser()
+  - Database Operation: findFirst, update
+* cURL Request:
+curl -X POST http://localhost:5000/api/v1/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{"email": "case.manager@vms.com", "otp": "123456", "newPassword": "NewPassword@123"}'
+* Expected Status Codes: 200 (Success), 400 (Invalid/Expired OTP or weak password)
+
+---
+## REFRESH TOKEN
+---
+* API Name: Refresh Expired Access Token
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/auth/refresh-token
+* Description: Generate new access and refresh tokens using a valid refresh token.
+* Bearer Token Required: NO
+* Role Required: None (Public, but requires valid refresh token payload)
+* Required Headers:
+  Content-Type: application/json
+* Complete Request Body:
+{
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsIn..."
+}
+  * Validation Rules:
+    - refreshToken: Required, string, non-empty
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Token refreshed successfully.",
+  "data": {
+    "accessToken": "eyJhbGciOiJIUzI1NiIsIn...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIsIn..."
+  }
+}
+* Business Logic: Validate signature of refresh token. Look up active user containing the matching refresh token. Issue new access token and rotating refresh token. Save to database.
+  - Controller Function: refreshToken()
+  - Service Function: authService.refreshToken()
+  - Repository Function: userRepository.findByRefreshToken(), userRepository.updateUser()
+  - Database Operation: findFirst, update
+* cURL Request:
+curl -X POST http://localhost:5000/api/v1/auth/refresh-token \
+  -H "Content-Type: application/json" \
+  -d '{"refreshToken": "JWT_REFRESH_TOKEN"}'
+* Expected Status Codes: 200 (Success), 401 (Invalid or unauthorized refresh token)
+
+---
+## LOGOUT USER
+---
+* API Name: Log User Out
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/auth/logout
+* Description: Invalidate current user session and nullify stored refresh token.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Complete Request Body: None
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Logout successful"
+}
+* Business Logic: Clear refresh_token from the User record in database.
+  - Controller Function: logout()
+  - Service Function: authService.logout()
+  - Repository Function: userRepository.findById(), userRepository.updateUser()
+  - Database Operation: findFirst, update
+* cURL Request:
+curl -X POST http://localhost:5000/api/v1/auth/logout \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success), 401 (Unauthorized)
+
+---
+## GET USER PROFILE
+---
+* API Name: Get Active User Profile
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/auth/profile
+* Description: Retrieve detailed profile properties of the authenticated session owner.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "data": {
+    "id": "78326a27-0245-42f0-94eb-b6732be3ff81",
+    "email": "admin@vms.com",
+    "role": "SUPER_ADMIN",
+    "first_name": "System",
+    "last_name": "Admin",
+    "is_active": true,
+    "last_login_at": "2026-06-30T10:15:00.000Z",
+    "created_at": "2026-06-30T10:10:00.000Z"
+  }
+}
+* Business Logic: Lookup active user from req.user context, strip sensitive password column, return.
+  - Controller Function: getProfile()
+  - Service Function: authService.getProfile()
+  - Repository Function: userRepository.findById()
+  - Database Operation: findFirst
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/auth/profile \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success), 401 (Unauthorized)
+
+---
+## CHANGE PASSWORD
+---
+* API Name: Change Profile Password
+* HTTP Method: PUT
+* Complete Endpoint: /api/v1/auth/password
+* Description: Modify password of the logged-in user session.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Complete Request Body:
+{
+  "oldPassword": "Admin@123",
+  "newPassword": "NewAdminPassword@123"
+}
+  * Validation Rules:
+    - oldPassword: Required, string, non-empty
+    - newPassword: Required, string, min 8 characters with strength rules
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Password updated successfully"
+}
+* Business Logic: Verify existing password matches database record. Hash new password. Update user record in database.
+  - Controller Function: changePassword()
+  - Service Function: authService.changePassword()
+  - Repository Function: userRepository.findById(), userRepository.updateUser()
+  - Database Operation: findFirst, update
+* cURL Request:
+curl -X PUT http://localhost:5000/api/v1/auth/password \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>" \
+  -d '{"oldPassword": "Admin@123", "newPassword": "NewAdminPassword@123"}'
+* Expected Status Codes: 200 (Success), 400 (Validation failed), 401 (Wrong credentials or old password mismatch)
+
+------------------------------
+MODULE SUMMARY - AUTHENTICATION
+------------------------------
+Available APIs:
+  - POST /api/v1/auth/login
+  - POST /api/v1/auth/forgot-password
+  - POST /api/v1/auth/verify-otp
+  - POST /api/v1/auth/reset-password
+  - POST /api/v1/auth/refresh-token
+  - POST /api/v1/auth/logout
+  - GET /api/v1/auth/profile
+  - PUT /api/v1/auth/password
+Missing CRUD APIs: None
+Dependencies: None
+Required Database Tables: users
+Required Roles: All (Public & Protected routes present)
+Required Permissions: AUTH.GET_PROFILE, AUTH.CHANGE_PASSWORD, AUTH.LOGOUT
+Testing Sequence: Login -> Get Profile -> Change Password -> Login (New Pass) -> Refresh Token -> Logout
+
+======================================================
+MODULE : USERS
+==============
+Description: Provides system-wide administrative control over internal user profiles.
+Purpose: Manage internal roles (Case Manager, Team Lead, Manager, Finance Head).
+Required Role: SUPER_ADMIN only
+Required Authentication: YES (SUPER_ADMIN Bearer Token)
+Database Tables Used: users
+Prisma Models Used: User
+Controller: src/modules/users/user.controller.js
+Service: src/modules/users/user.service.js
+Repository: src/modules/users/user.repository.js
+Validation Files: src/zodSchema/user.schema.js
+Middleware Used: auth.middleware.js, authorize.middleware.js, validate.middleware.js
+File Upload Middleware: None
+
+////////////////////////////////////////////////////
+USERS MODULE - APIS
+////////////////////////////////////////////////////
+
+---
+## CREATE USER
+---
+* API Name: Create User
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/users
+* Description: Register a new system user profile.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <SUPER_ADMIN_JWT>
+* Complete Request Body:
+{
+  "email": "finance.head@vms.com",
+  "password": "Manager@123",
+  "firstName": "John",
+  "lastName": "Doe",
+  "role": "FINANCE_HEAD"
+}
+  * Validation Rules:
+    - email: Required, valid email string, unique
+    - password: Required, string, complex security rules
+    - firstName: Required, string, minimum length 1
+    - lastName: Required, string, minimum length 1
+    - role: Required, string (SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD)
+* Success Response (Status: 201 Created):
+{
+  "success": true,
+  "message": "User created successfully.", 
+  "data": 
+    "id": "5cb8276f-ef87-4340-97eb-29177112ea11",
+    "email": "finance.head@vms.com",
+    "role": "FINANCE_HEAD",
+    "first_name": "John",
+    "last_name": "Doe",
+    "is_active": true,
+    "created_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Validate uniqueness of email. Hash password using bcrypt. Create user.
+  - Controller Function: createUser()
+  - Service Function: userService.createUser()
+  - Repository Function: userRepository.findByEmail(), userRepository.createUser()
+  - Database Operation: findUnique, create
+* cURL Request:
+curl -X POST http://localhost:5000/api/v1/users \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <SUPER_ADMIN_JWT>" \
+  -d '{"email": "finance.head@vms.com", "password": "Manager@123", "firstName": "John", "lastName": "Doe", "role": "FINANCE_HEAD"}'
+* Expected Status Codes: 201 (Created), 409 (Email already exists), 401/403 (Unauthorized/Forbidden)
+
+---
+## GET ALL USERS
+---
+* API Name: List and Search Users
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/users
+* Description: Fetch paginated list of active users, with options to search and filter by role or status.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN
+* Required Headers:
+  Authorization: Bearer <SUPER_ADMIN_JWT>
+* Query Parameters:
+  - search (optional): string (matches first_name, last_name, or email)
+  - role (optional): enum (SUPER_ADMIN, CASE_MANAGER, etc.)
+  - isActive (optional): string ("true" or "false")
+  - page (optional): integer (default: 1)
+  - limit (optional): integer (default: 10)
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "users": [
+    {
+      "id": "5cb8276f-ef87-4340-97eb-29177112ea11",
+      "email": "finance.head@vms.com",
+      "first_name": "John",
+      "last_name": "Doe",
+      "role": "FINANCE_HEAD",
+      "is_active": true,
+      "created_at": "2026-06-30T10:15:00.000Z"
+    }
+  ],
+  "total": 1
+}
+* Business Logic: Count total matching non-deleted users, slice records according to page/limit, strip passwords and return transaction array.
+  - Controller Function: getUsers()
+  - Service Function: userService.searchUsers()
+  - Repository Function: userRepository.findAll()
+  - Database Operation: findMany, count
+* cURL Request:
+curl -X GET "http://localhost:5000/api/v1/users?role=FINANCE_HEAD&limit=5" \
+  -H "Authorization: Bearer <SUPER_ADMIN_JWT>"
+* Expected Status Codes: 200 (Success)
+
+---
+## GET USER BY ID
+---
+* API Name: Fetch Single User profile
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/users/:id
+* Description: Fetch detailed fields of a specific user.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN
+* Required Headers:
+  Authorization: Bearer <SUPER_ADMIN_JWT>
+* URL Parameters:
+  - id: Required, string (UUID v4 format)
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "data": {
+    "id": "5cb8276f-ef87-4340-97eb-29177112ea11",
+    "email": "finance.head@vms.com",
+    "role": "FINANCE_HEAD",
+    "first_name": "John",
+    "last_name": "Doe",
+    "is_active": true,
+    "created_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Get user matching parameter. Throw 404 if not found or soft-deleted.
+  - Controller Function: getUserById()
+  - Service Function: userService.getUserById()
+  - Repository Function: userRepository.findById()
+  - Database Operation: findFirst
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/users/5cb8276f-ef87-4340-97eb-29177112ea11 \
+  -H "Authorization: Bearer <SUPER_ADMIN_JWT>"
+* Expected Status Codes: 200 (Success), 404 (User not found)
+
+---
+## UPDATE USER
+---
+* API Name: Update User Info
+* HTTP Method: PUT
+* Complete Endpoint: /api/v1/users/:id
+* Description: Update metadata, email or role of a user profile.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <SUPER_ADMIN_JWT>
+* URL Parameters:
+  - id: Required, string (UUID v4 format)
+* Complete Request Body:
+{
+  "email": "john.new@vms.com",
+  "firstName": "Johnathan",
+  "lastName": "Doe",
+  "role": "TEAM_LEAD"
+}
+  * Validation Rules:
+    - At least one field must be provided. Optional updates.
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "User updated successfully.",
+  "data": {
+    "id": "5cb8276f-ef87-4340-97eb-29177112ea11",
+    "email": "john.new@vms.com",
+    "first_name": "Johnathan",
+    "last_name": "Doe",
+    "role": "TEAM_LEAD",
+    "is_active": true,
+    "created_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Validate target user. Sanitize inputs. Apply update in DB.
+  - Controller Function: updateUser()
+  - Service Function: userService.updateUser()
+  - Repository Function: userRepository.findById(), userRepository.updateUser()
+  - Database Operation: findFirst, update
+* cURL Request:
+curl -X PUT http://localhost:5000/api/v1/users/5cb8276f-ef87-4340-97eb-29177112ea11 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <SUPER_ADMIN_JWT>" \
+  -d '{"firstName": "Johnathan"}'
+* Expected Status Codes: 200 (Success), 400 (Bad request or empty fields), 404 (Not found)
+
+---
+## SOFT DELETE
+---
+* API Name: Soft Delete User
+* HTTP Method: DELETE
+* Complete Endpoint: /api/v1/users/:id
+* Description: Soft delete a user by setting the deleted_at column and deactivating.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN
+* Required Headers:
+  Authorization: Bearer <SUPER_ADMIN_JWT>
+* URL Parameters:
+  - id: Required, string (UUID v4 format)
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "User deleted successfully"
+}
+* Business Logic: Validate user exists. Set deleted_at, deactivate is_active, nullify refresh token.
+  - Controller Function: deleteUser()
+  - Service Function: userService.deleteUser()
+  - Repository Function: userRepository.findById(), userRepository.softDeleteUser()
+  - Database Operation: findFirst, update
+* cURL Request:
+curl -X DELETE http://localhost:5000/api/v1/users/5cb8276f-ef87-4340-97eb-29177112ea11 \
+  -H "Authorization: Bearer <SUPER_ADMIN_JWT>"
+* Expected Status Codes: 200 (Success), 404 (User not found)
+
+---
+## TOGGLE STATUS
+---
+* API Name: Toggle User Active Status
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/users/:id/status
+* Description: Set is_active to true/false for a user record.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <SUPER_ADMIN_JWT>
+* URL Parameters:
+  - id: Required, string (UUID v4 format)
+* Complete Request Body:
+{
+  "isActive": false
+}
+  * Validation Rules:
+    - isActive: Required, boolean
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "User status updated successfully.",
+  "data": {
+    "id": "5cb8276f-ef87-4340-97eb-29177112ea11",
+    "email": "finance.head@vms.com",
+    "role": "FINANCE_HEAD",
+    "is_active": false
+  }
+}
+* Business Logic: Update user status directly.
+  - Controller Function: toggleUserStatus()
+  - Service Function: userService.toggleUserStatus()
+  - Repository Function: userRepository.findById(), userRepository.updateUser()
+  - Database Operation: findFirst, update
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/users/5cb8276f-ef87-4340-97eb-29177112ea11/status \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <SUPER_ADMIN_JWT>" \
+  -d '{"isActive": false}'
+* Expected Status Codes: 200 (Success), 404 (Not found)
+
+---
+## ADMIN RESET PASSWORD
+---
+* API Name: Admin Driven User Password Reset
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/users/:id/reset-password
+* Description: Overwrite a user's password directly by an administrator.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <SUPER_ADMIN_JWT>
+* URL Parameters:
+  - id: Required, string (UUID v4 format)
+* Complete Request Body:
+{
+  "newPassword": "ForcedPassword@999"
+}
+  * Validation Rules:
+    - newPassword: Required, string, complex characters, min length 8
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Password reset successfully."
+}
+* Business Logic: Validate user exists. Hash password directly. Save. Clear OTP tokens.
+  - Controller Function: adminResetPassword()
+  - Service Function: userService.adminResetPassword()
+  - Repository Function: userRepository.findById(), userRepository.updateUser()
+  - Database Operation: findFirst, update
+* cURL Request:
+curl -X POST http://localhost:5000/api/v1/users/5cb8276f-ef87-4340-97eb-29177112ea11/reset-password \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <SUPER_ADMIN_JWT>" \
+  -d '{"newPassword": "ForcedPassword@999"}'
+* Expected Status Codes: 200 (Success), 404 (Not found)
+
+----------------------
+MODULE SUMMARY - USERS
+----------------------
+Available APIs:
+  - POST /api/v1/users
+  - GET /api/v1/users
+  - GET /api/v1/users/:id
+  - PUT /api/v1/users/:id
+  - DELETE /api/v1/users/:id
+  - PATCH /api/v1/users/:id/status
+  - POST /api/v1/users/:id/reset-password
+Missing CRUD APIs: None
+Dependencies: None
+Required Database Tables: users
+Required Roles: SUPER_ADMIN
+Required Permissions: USER.MANAGE
+Testing Sequence: Create User -> List Users -> Update User -> Reset Password -> Toggle Status -> Soft Delete
+
+======================================================
+MODULE : VENDORS
+================
+Description: Manages external vendor profiles, approvals, audits, and compliance.
+Purpose: Maintain vendor records, draft workflows, and approve statuses.
+Required Role: CASE_MANAGER (create, update), FINANCE_HEAD (review, update, approve/reject/block)
+Required Authentication: YES (Bearer Access Token)
+Database Tables Used: vendors, approval_logs, notifications, users
+Prisma Models Used: Vendor, ApprovalLog, Notification, User
+Controller: src/modules/vendors/vendor.controller.js
+Service: src/modules/vendors/vendor.service.js
+Repository: src/modules/vendors/vendor.repository.js
+Validation Files: src/modules/vendors/vendor.validation.js, src/zodSchema/vendor.schema.js
+Middleware Used: auth.middleware.js, authorize.middleware.js, validate.middleware.js
+File Upload Middleware: None
+
+////////////////////////////////////////////////////
+VENDORS MODULE - APIS
+////////////////////////////////////////////////////
+
+---
+## CREATE VENDOR
+---
+* API Name: Create Vendor Draft
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/vendors
+* Description: Register a new vendor profile in 'pending' status.
+* Bearer Token Required: YES
+* Role Required: CASE_MANAGER
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <CASE_MANAGER_JWT>
+* Complete Request Body:
+{
+  "name": "ACRE Supplies Pvt Ltd",
+  "email": "sales@ACREsupplies.com",
+  "phone": "9876543210",
+  "address": "404, Tech Park, Sector 62",
+  "city": "Noida",
+  "state": "Uttar Pradesh",
+  "zipCode": "201301",
+  "taxId": "GSTIN9876543210F",
+  "category": "Office Equipment",
+  "contactPerson": "Wiley Coyote",
+  "bankAccountNo": "1009988221122",
+  "ifscCode": "SBIN0001234",
+  "paymentTerms": "NET30"
+}
+  * Validation Rules:
+    - name: Required, string, min length 1
+    - email: Required, valid email string, lowercased, trimmed
+    - phone: Required, string, min length 5
+    - address: Required, string, min length 1
+    - taxId: Required, string, min length 1, unique tax key (accepts either camelCase "taxId" or snake_case "tax_id")
+    - category: Required, string, min length 1
+  * Payload Formats: Accepts either camelCase properties (e.g. taxId, zipCode, vendorCode) or snake_case properties (e.g. tax_id, zip_code, vendor_code). Snake_case properties are preprocessed dynamically into camelCase.
+* Success Response (Status: 201 Created):
+{
+  "success": true,
+  "message": "Vendor created successfully.",
+  "data": {
+    "id": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+    "name": "ACRE Supplies Pvt Ltd",
+    "vendor_code": "ACRE-1782361287632",
+    "email": "sales@ACREsupplies.com",
+    "phone": "9876543210",
+    "status": "pending",
+    "created_by_id": "case-manager-uuid",
+    "created_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Check taxId and email duplicates. Auto-generate unique vendor code. Set status to 'pending'. Link created_by_id. Create entry.
+  - Controller Function: createVendor()
+  - Service Function: vendorService.createVendor()
+  - Repository Function: vendorRepository.create()
+  - Database Operation: create
+* cURL Request:
+curl -X POST http://localhost:5000/api/v1/vendors \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <CASE_MANAGER_JWT>" \
+  -d '{"name": "ACRE Supplies Pvt Ltd", "email": "sales@ACREsupplies.com", "phone": "9876543210", "address": "404 Tech Park", "taxId": "GSTIN9876543210F", "category": "Office Equipment"}'
+* Expected Status Codes: 201 (Created), 409 (Email or Tax ID duplicated)
+
+---
+## GET ALL VENDORS
+---
+* API Name: List and Search Vendors
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/vendors
+* Description: Fetch active vendors. Scoped: Case Managers see only their own drafts; other roles see all.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Query Parameters:
+  - status (optional): enum ('pending', 'approved', 'rejected', 'blocked')
+  - search (optional): string (matches name, code, email, taxId)
+  - page (optional): integer (default: 1)
+  - limit (optional): integer (default: 10)
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "vendors": [
+    {
+      "id": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+      "name": "ACRE Supplies Pvt Ltd",
+      "vendor_code": "ACRE-1782361287632",
+      "status": "pending",
+      "created_by": { "id": "cm-uuid", "email": "case.manager@vms.com" }
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 10,
+  "totalPages": 1
+}
+* Business Logic: Exclude deleted_at. Scope query based on role. Return pagination slice.
+  - Controller Function: getVendors()
+  - Service Function: vendorService.listVendors()
+  - Repository Function: vendorRepository.findAll()
+  - Database Operation: findMany, count
+* cURL Request:
+curl -X GET "http://localhost:5000/api/v1/vendors?status=pending" \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success)
+
+---
+## GET VENDOR BY ID
+---
+* API Name: Get Vendor details
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/vendors/:id
+* Description: Retrieve detailed vendor properties.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* URL Parameters:
+  - id: Required, string (UUID format)
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "data": {
+    "id": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+    "name": "ACRE Supplies Pvt Ltd",
+    "vendor_code": "ACRE-1782361287632",
+    "email": "sales@ACREsupplies.com",
+    "phone": "9876543210",
+    "tax_id": "GSTIN9876543210F",
+    "status": "pending",
+    "created_by": { "id": "cm-uuid", "email": "case.manager@vms.com" }
+  }
+}
+* Business Logic: Get vendor. If CASE_MANAGER requesting, check ownership. If mismatch, return 403.
+  - Controller Function: getVendorById()
+  - Service Function: vendorService.getVendorById()
+  - Repository Function: vendorRepository.findById()
+  - Database Operation: findFirst
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/vendors/e2d5c3fa-a690-4a30-8902-6014fb501ba1 \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success), 403 (Access restricted), 404 (Not found)
+
+---
+## UPDATE VENDOR
+---
+* API Name: Update Vendor Details
+* HTTP Method: PUT
+* Complete Endpoint: /api/v1/vendors/:id
+* Description: Edit metadata columns of an unapproved (pending/rejected) vendor.
+* Bearer Token Required: YES
+* Role Required: CASE_MANAGER, FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* URL Parameters:
+  - id: Required, string (UUID format)
+* Complete Request Body:
+{
+  "name": "ACRE Supplies Ltd",
+  "phone": "9988776655"
+}
+  * Validation Rules:
+    - name: Optional, string, min 2 chars
+    - phone: Optional, string, min 10 digits
+    - email: Optional, valid email
+    - address: Optional, min 5 chars
+  * Payload Formats: Accepts either camelCase properties (e.g. taxId, zipCode, vendorCode) or snake_case properties (e.g. tax_id, zip_code, vendor_code). Snake_case properties are preprocessed dynamically into camelCase.
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Vendor updated successfully.",
+  "data": {
+    "id": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+    "name": "ACRE Supplies Ltd",
+    "phone": "9988776655"
+  }
+}
+* Business Logic: Validate existence. CM can only edit their own. Case managers cannot edit APPROVED vendors (requires Finance Manager). Update DB record.
+  - Controller Function: updateVendor()
+  - Service Function: vendorService.updateVendor()
+  - Repository Function: vendorRepository.findById(), vendorRepository.update()
+  - Database Operation: findFirst, update
+* cURL Request:
+curl -X PUT http://localhost:5000/api/v1/vendors/e2d5c3fa-a690-4a30-8902-6014fb501ba1 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>" \
+  -d '{"name": "ACRE Supplies Ltd"}'
+* Expected Status Codes: 200 (Success), 400 (Invalid updates/Approved vendor CM edit block), 403 (CM ownership mismatch)
+
+---
+## APPROVE VENDOR
+---
+* API Name: Approve Vendor
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/vendors/:id/approve
+* Description: Review and transition a vendor status to 'approved'.
+* Bearer Token Required: YES
+* Role Required: FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <FINANCE_HEAD_JWT>
+* URL Parameters:
+  - id: Required, string (UUID format)
+* Complete Request Body:
+{
+  "remarks": "Document matching completed. Checked registry."
+}
+  * Validation Rules:
+    - remarks: Optional, string, trimmed
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Vendor approved successfully.",
+  "data": {
+    "id": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+    "status": "approved",
+    "approved_by_id": "fm-uuid",
+    "approved_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Transition status to approved. Record approval_logs log. Fire non-blocking app notification to CM.
+  - Controller Function: approveVendor()
+  - Service Function: vendorService.changeVendorStatus()
+  - Repository Function: vendorRepository.findById(), vendorRepository.update(), approvalRepository.createLog()
+  - Database Operation: findFirst, update, create
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/vendors/e2d5c3fa-a690-4a30-8902-6014fb501ba1/approve \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <FINANCE_HEAD_JWT>" \
+  -d '{"remarks": "Approved"}'
+* Expected Status Codes: 200 (Success), 404 (Not found)
+
+---
+## REJECT VENDOR
+---
+* API Name: Reject Vendor
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/vendors/:id/reject
+* Description: Transition vendor status to 'rejected'.
+* Bearer Token Required: YES
+* Role Required: FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <FINANCE_HEAD_JWT>
+* URL Parameters:
+  - id: Required, string (UUID format)
+* Complete Request Body:
+{
+  "remarks": "Invalid bank routing format."
+}
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Vendor rejected successfully.",
+  "data": {
+    "id": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+    "status": "rejected",
+    "rejected_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Change status. Record log. Trigger notification.
+  - Controller Function: rejectVendor()
+  - Service Function: vendorService.changeVendorStatus()
+  - Repository Function: vendorRepository.findById(), vendorRepository.update(), approvalRepository.createLog()
+  - Database Operation: findFirst, update, create
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/vendors/e2d5c3fa-a690-4a30-8902-6014fb501ba1/reject \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <FINANCE_HEAD_JWT>" \
+  -d '{"remarks": "Incorrect routing"}'
+* Expected Status Codes: 200 (Success)
+
+---
+## BLOCK VENDOR
+---
+* API Name: Block Vendor
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/vendors/:id/block
+* Description: Block a vendor to suspend their actions (creating POs/invoices).
+* Bearer Token Required: YES
+* Role Required: FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <FINANCE_HEAD_JWT>
+* URL Parameters:
+  - id: Required, string (UUID format)
+* Complete Request Body:
+{
+  "remarks": "Flagged by internal audits."
+}
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Vendor blocked successfully.",
+  "data": {
+    "id": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+    "status": "blocked",
+    "blocked_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Transition status to blocked. Log block history. Notify CM creator.
+  - Controller Function: blockVendor()
+  - Service Function: vendorService.changeVendorStatus()
+  - Repository Function: vendorRepository.findById(), vendorRepository.update(), approvalRepository.createLog()
+  - Database Operation: findFirst, update, create
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/vendors/e2d5c3fa-a690-4a30-8902-6014fb501ba1/block \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <FINANCE_HEAD_JWT>" \
+  -d '{"remarks": "Internal audit flag"}'
+* Expected Status Codes: 200 (Success)
+
+---
+## UNBLOCK VENDOR
+---
+* API Name: Unblock Vendor
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/vendors/:id/unblock
+* Description: Unblock a previously blocked vendor, transitioning them back to approved status.
+* Bearer Token Required: YES
+* Role Required: FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <FINANCE_HEAD_JWT>
+* URL Parameters:
+  - id: Required, string (UUID format)
+* Complete Request Body:
+  - remarks: Optional, string
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Vendor unblocked successfully.",
+  "data": {
+    "id": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+    "status": "approved",
+    "approved_at": "2026-07-01T11:05:00.000Z",
+    "approved_by_id": "u0a0b0c0-efaa-99bb-8201-1904bb987622"
+  }
+}
+* Business Logic: Transition status from blocked to approved. Log unblock history. Notify CM creator.
+  - Controller Function: unblockVendor()
+  - Service Function: vendorService.unblockVendor()
+  - Repository Function: vendorRepository.findById(), vendorRepository.update(), approvalRepository.createLog()
+  - Database Operation: findFirst, update, create
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/vendors/e2d5c3fa-a690-4a30-8902-6014fb501ba1/unblock \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <FINANCE_HEAD_JWT>" \
+  -d '{"remarks": "Resolved audit issue"}'
+* Expected Status Codes: 200 (Success), 400 (Bad Request if not currently blocked), 404 (Not Found)
+
+------------------------
+MODULE SUMMARY - VENDORS
+------------------------
+Available APIs:
+  - POST /api/v1/vendors
+  - GET /api/v1/vendors
+  - GET /api/v1/vendors/:id
+  - PUT /api/v1/vendors/:id
+  - PATCH /api/v1/vendors/:id/approve
+  - PATCH /api/v1/vendors/:id/reject
+  - PATCH /api/v1/vendors/:id/block
+  - PATCH /api/v1/vendors/:id/unblock
+Missing CRUD APIs:
+  - DELETE /api/v1/vendors/:id (Zod and Repository code exist but routes are unmapped)
+  - PATCH /api/v1/vendors/:id/status (Toggle vendor status)
+Dependencies: None
+Required Database Tables: vendors, approval_logs, notifications, users
+Required Roles: CASE_MANAGER, FINANCE_HEAD
+Required Permissions: VENDOR.CREATE, VENDOR.READ, VENDOR.REVIEW
+Testing Sequence: Create Vendor -> List Vendors -> Update Vendor -> Approve Vendor -> Block Vendor
+
+======================================================
+MODULE : PURCHASE ORDERS
+========================
+Description: Manages commercial purchase orders linked to approved vendors.
+Purpose: Create and close PO records.
+Required Role: CASE_MANAGER, FINANCE_HEAD (create), FINANCE_HEAD (status update)
+Required Authentication: YES (Bearer Access Token)
+Database Tables Used: purchase_orders, vendors, users
+Prisma Models Used: PurchaseOrder, Vendor, User
+Controller: src/modules/purchase-orders/po.controller.js
+Service: src/modules/purchase-orders/po.service.js
+Repository: src/modules/purchase-orders/po.repository.js
+Validation Files: src/modules/purchase-orders/po.validation.js
+Middleware Used: auth.middleware.js, authorize.middleware.js, validate.middleware.js
+File Upload Middleware: None
+
+////////////////////////////////////////////////////
+PURCHASE ORDERS MODULE - APIS
+////////////////////////////////////////////////////
+
+---
+## CREATE PURCHASE ORDER
+---
+* API Name: Create Purchase Order (PO)
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/purchase-orders
+* Description: Register a new PO in 'pending' status.
+* Bearer Token Required: YES
+* Allowed Roles: CASE_MANAGER, FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Complete Request Body:
+{
+  "vendorId": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+  "poNumber": "PO-2026-001",
+  "amount": 25000.00,
+  "currency": "INR",
+  "description": "Standard office equipment procurement",
+  "orderDate": "2026-06-30T10:15:00.000Z",
+  "expectedDeliveryDate": "2026-07-31T10:15:00.000Z"
+}
+  * Validation Rules:
+    - vendorId: Required, UUID format
+    - poNumber: Optional, unique string
+    - amount: Required, positive number (> 0)
+    - currency: Optional (default: "INR")
+* Success Response (Status: 201 Created):
+{
+  "success": true,
+  "message": "Purchase order created successfully.",
+  "data": {
+    "id": "cfa3e6d8-90f1-432a-bc9e-7164ea2b1a11",
+    "po_number": "PO-2026-001",
+    "vendor_id": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+    "amount": "25000.00",
+    "status": "pending",
+    "created_by_id": "creator-uuid"
+  }
+}
+* Business Logic: Validate vendor exists and status is approved. CM can only build PO for vendors they created. Auto-generate po_number if omitted. Save.
+  - Controller Function: createPurchaseOrder()
+  - Service Function: purchaseOrderService.createPurchaseOrder()
+  - Repository Function: vendorRepository.findById(), purchaseOrderRepository.create()
+  - Database Operation: findFirst, create
+* cURL Request:
+curl -X POST http://localhost:5000/api/v1/purchase-orders \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <CASE_MANAGER_JWT>" \
+  -d '{"vendorId": "e2d5c3fa-a690-4a30-8902-6014fb501ba1", "amount": 25000.00}'
+* Expected Status Codes: 201 (Created), 400 (Vendor not approved), 404 (Vendor not found), 409 (PO code exists)
+
+---
+## GET ALL PURCHASE ORDERS
+---
+* API Name: List Purchase Orders
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/purchase-orders
+* Description: Fetch active POs. Scoped by creator ownership for CM.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Query Parameters:
+  - status (optional): enum ('pending', 'open', 'closed', 'cancelled')
+  - vendorId (optional): UUID
+  - page (optional): integer (default: 1)
+  - limit (optional): integer (default: 10)
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "purchaseOrders": [
+    {
+      "id": "cfa3e6d8-90f1-432a-bc9e-7164ea2b1a11",
+      "po_number": "PO-2026-001",
+      "status": "pending",
+      "vendor": { "id": "e2d5c3fa...", "name": "ACRE Supplies Pvt Ltd" }
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 10,
+  "totalPages": 1
+}
+* Business Logic: Match active PO lists. Apply CM creator filter.
+  - Controller Function: getPurchaseOrders()
+  - Service Function: purchaseOrderService.listPurchaseOrders()
+  - Repository Function: purchaseOrderRepository.findAll()
+  - Database Operation: findMany, count
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/purchase-orders \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success)
+
+---
+## GET PURCHASE ORDER BY ID
+---
+* API Name: Get Purchase Order details
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/purchase-orders/:id
+* Description: Fetch a single PO.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* URL Parameters:
+  - id: Required, UUID
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "data": {
+    "id": "cfa3e6d8-90f1-432a-bc9e-7164ea2b1a11",
+    "po_number": "PO-2026-001",
+    "amount": "25000.00",
+    "status": "pending",
+    "vendor": { "id": "e2d5c3fa...", "name": "ACRE Supplies Pvt Ltd" }
+  }
+}
+* Business Logic: Get PO. Check ownership limits for CM.
+  - Controller Function: getPurchaseOrderById()
+  - Service Function: purchaseOrderService.getPurchaseOrderById()
+  - Repository Function: purchaseOrderRepository.findById()
+  - Database Operation: findUnique
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/purchase-orders/cfa3e6d8-90f1-432a-bc9e-7164ea2b1a11 \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success), 403 (CM limit boundary mismatch), 404 (Not found)
+
+---
+## UPDATE PO STATUS
+---
+* API Name: Update Purchase Order Status
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/purchase-orders/:id/status
+* Description: Approve, cancel or close a PO.
+* Bearer Token Required: YES
+* Allowed Roles: FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <FINANCE_HEAD_JWT>
+* URL Parameters:
+  - id: Required, UUID
+* Complete Request Body:
+{
+  "status": "open"
+}
+  * Validation Rules:
+    - status: Required, enum ('pending', 'open', 'closed', 'cancelled')
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Purchase order status updated successfully.",
+  "data": {
+    "id": "cfa3e6d8-90f1-432a-bc9e-7164ea2b1a11",
+    "status": "open",
+    "closed_at": null,
+    "cancelled_at": null
+  }
+}
+* Business Logic: Update PO status. Save timestamps for closed_at/cancelled_at when applicable.
+  - Controller Function: updatePurchaseOrderStatus()
+  - Service Function: purchaseOrderService.updatePurchaseOrderStatus()
+  - Repository Function: purchaseOrderRepository.findById(), purchaseOrderRepository.update()
+  - Database Operation: findUnique, update
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/purchase-orders/cfa3e6d8-90f1-432a-bc9e-7164ea2b1a11/status \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <FINANCE_HEAD_JWT>" \
+  -d '{"status": "open"}'
+* Expected Status Codes: 200 (Success), 404 (PO not found)
+
+-------------------------------
+MODULE SUMMARY - PURCHASE ORDERS
+-------------------------------
+Available APIs:
+  - POST /api/v1/purchase-orders
+  - GET /api/v1/purchase-orders
+  - GET /api/v1/purchase-orders/:id
+  - PATCH /api/v1/purchase-orders/:id/status
+Missing CRUD APIs:
+  - PUT /api/v1/purchase-orders/:id (Draft edit option is missing)
+  - DELETE /api/v1/purchase-orders/:id (Delete PO is missing)
+Dependencies: Approved Vendor is required
+Required Database Tables: purchase_orders, vendors, users
+Required Roles: CASE_MANAGER, FINANCE_HEAD
+Required Permissions: Read/write on PO scopes
+Testing Sequence: Create PO -> List POs -> Get PO details -> Update Status to Open
+
+======================================================
+MODULE : INVOICES
+=================
+Description: Manages accounts payable invoices, verification details, and
+             three-way matching routing workflows.
+Purpose: Upload and route invoices for approvals.
+Required Role: CASE_MANAGER (create), TEAM_LEAD, MANAGER, FINANCE_HEAD (review & approve based on limits)
+Required Authentication: YES (Bearer Access Token)
+Database Tables Used: invoices, vendors, purchase_orders, approval_logs, notifications, users
+Prisma Models Used: Invoice, Vendor, PurchaseOrder, ApprovalLog, Notification, User
+////////////////////////////////////////////////////
+INVOICES MODULE - APIS
+////////////////////////////////////////////////////
+
+---
+## CREATE INVOICE
+---
+* API Name: Create Invoice
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/invoices
+* Description: Register a new invoice in 'pending' status.
+* Bearer Token Required: YES
+* Role Required: CASE_MANAGER
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <CASE_MANAGER_JWT>
+* Complete Request Body:
+{
+  "vendorId": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+  "purchaseOrderId": "cfa3e6d8-90f1-432a-bc9e-7164ea2b1a11",
+  "invoiceNumber": "INV-2026-999",
+  "amount": 9500.00,
+  "currency": "INR",
+  "invoiceDate": "2026-06-30T10:15:00.000Z",
+  "dueDate": "2026-07-30T10:15:00.000Z",
+  "description": "Office furniture invoice"
+}
+  * Validation Rules:
+    - vendorId: Required, UUID
+    - purchaseOrderId: Required, UUID
+    - invoiceNumber: Optional, string
+    - amount: Required, positive number (> 0)
+    - currency: Optional (default: "INR")
+* Success Response (Status: 201 Created):
+{
+  "success": true,
+  "message": "Invoice created successfully.",
+  "data": {
+    "id": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99",
+    "invoice_number": "INV-2026-999",
+    "amount": "9500.00",
+    "status": "PENDING_THREE_WAY_MATCH",
+    "required_approval_role": "TEAM_LEAD",
+    "created_by_id": "creator-uuid"
+  }
+}
+* Business Logic: Validate vendor is approved. Validate PO is open. Auto-set status to 'PENDING_THREE_WAY_MATCH' to await CM three-way match calculation.
+  - Controller Function: createInvoice()
+  - Service Function: invoiceService.createInvoice()
+  - Repository Function: vendorRepository.findById(), purchaseOrderRepository.findById(), invoiceRepository.create()
+  - Database Operation: findFirst, findUnique, create
+* cURL Request:
+curl -X POST http://localhost:5000/api/v1/invoices \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <CASE_MANAGER_JWT>" \
+  -d '{"vendorId": "e2d5c3fa...", "purchaseOrderId": "cfa3e6d8...", "amount": 9500.00}'
+* Expected Status Codes: 201 (Created), 400 (Vendor not approved / PO mismatch / PO cancelled), 409 (Invoice number exists)
+
+---
+## GET ALL INVOICES
+---
+* API Name: List Invoices
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/invoices
+* Description: Fetch active invoices. Scopes: CM sees own invoices; TEAM_LEAD, MANAGER, FINANCE_HEAD see only invoices matching their specific assigned level.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Query Parameters:
+  - status (optional): enum ('PENDING_THREE_WAY_MATCH', 'PENDING_ADMIN_REVIEW', 'PENDING_TEAM_LEAD', 'PENDING_MANAGER', 'PENDING_FINANCE_HEAD', 'APPROVED', 'REJECTED')
+  - vendorId (optional): UUID
+  - purchaseOrderId (optional): UUID
+  - requiredApprovalRole (optional): enum ('TEAM_LEAD', 'MANAGER', 'FINANCE_HEAD')
+  - page (optional): integer (default: 1)
+  - limit (optional): integer (default: 10)
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "invoices": [
+    {
+      "id": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99",
+      "invoice_number": "INV-2026-999",
+      "amount": "9500.00",
+      "status": "PENDING_TEAM_LEAD",
+      "required_approval_role": "TEAM_LEAD"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 10,
+  "totalPages": 1
+}
+* Business Logic: Match active invoices. Scope lists. Approvers cannot query/see other levels' pending invoices.
+  - Controller Function: getInvoices()
+  - Service Function: invoiceService.listInvoices()
+  - Repository Function: invoiceRepository.findAll()
+  - Database Operation: findMany, count
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/invoices \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success)
+
+---
+## GET INVOICE BY ID
+---
+* API Name: Get Invoice Details
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/invoices/:id
+* Description: Fetch detailed properties of a specific invoice.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* URL Parameters:
+  - id: Required, UUID
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "data": {
+    "id": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99",
+    "invoice_number": "INV-2026-999",
+    "amount": "9500.00",
+    "status": "PENDING_TEAM_LEAD",
+    "required_approval_role": "TEAM_LEAD",
+    "vendor": { "id": "vendor-uuid", "name": "ACRE Supplies Pvt Ltd" }
+  }
+}
+* Business Logic: Get invoice. Restrict CM to own files. Restrict reviewers to their designated level.
+  - Controller Function: getInvoiceById()
+  - Service Function: invoiceService.getInvoiceById()
+  - Repository Function: invoiceRepository.findById()
+  - Database Operation: findUnique
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/invoices/2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99 \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success), 403 (Level mismatch or creator mismatch), 404 (Not found)
+
+---
+## APPROVE INVOICE
+---
+* API Name: Approve Invoice
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/invoices/:id/approve
+* Description: Approve invoice at current level (Team Lead, Manager, or Finance Head).
+* Bearer Token Required: YES
+* Role Required: TEAM_LEAD, MANAGER, FINANCE_HEAD (Strictly matches the required role based on amount)
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <APPROVER_JWT>
+* URL Parameters:
+  - id: Required, UUID
+* Complete Request Body:
+{
+  "remarks": "Verified physical GRN values. Approve."
+}
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Invoice approved successfully.",
+  "data": {
+    "id": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99",
+    "status": "APPROVED",
+    "approved_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Validate role matches invoice current_approval_level. Transition status. Log to audit trail.
+  - Controller Function: approveInvoice()
+  - Service Function: invoiceService.approveInvoice()
+  - Repository Function: invoiceRepository.findById(), invoiceRepository.update()
+  - Database Operation: findUnique, update
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/invoices/2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99/approve \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <TEAM_LEAD_JWT>" \
+  -d '{"remarks": "Approved"}'
+* Expected Status Codes: 200 (Success), 400 (Not pending), 403 (Role mismatch), 404 (Not found)
+
+---
+## REJECT INVOICE
+---
+* API Name: Reject Invoice
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/invoices/:id/reject
+* Description: Transition an invoice to 'REJECTED'.
+* Bearer Token Required: YES
+* Role Required: TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <APPROVER_JWT>
+* URL Parameters:
+  - id: Required, UUID
+* Complete Request Body:
+{
+  "rejectionReason": "Wrong tax code calculation."
+}
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Invoice rejected successfully.",
+  "data": {
+    "id": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99",
+    "status": "REJECTED",
+    "rejected_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Validate role constraint. Set status to REJECTED. Log audit trail. Notify CM creator.
+  - Controller Function: rejectInvoice()
+  - Service Function: invoiceService.rejectInvoice()
+  - Repository Function: invoiceRepository.findById(), invoiceRepository.update()
+  - Database Operation: findUnique, update
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/invoices/2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99/reject \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <TEAM_LEAD_JWT>" \
+  -d '{"rejectionReason": "Wrong tax calculations"}'
+* Expected Status Codes: 200 (Success)
+
+---
+## DELETE INVOICE (TICKET SOFT DELETE)
+---
+* API Name: Soft Delete Invoice Ticket
+* HTTP Method: DELETE
+* Complete Endpoint: /api/v1/invoices/:id
+* Description: Soft delete an invoice ticket, recording delete reason and actor.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN, CASE_MANAGER (CM can only delete own invoices)
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* URL Parameters:
+  - id: Required, UUID
+* Complete Request Body:
+{
+  "deleteReason": "Incorrect PO attached by mistake"
+}
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Invoice deleted successfully."
+}
+* Business Logic: Verify ticket owner. Save `ticketDeletedAt`, `ticketDeletedBy`, and `ticketDeleteReason`. Update DB record and write audit log.
+  - Controller Function: deleteInvoice()
+  - Service Function: invoiceService.deleteInvoice()
+  - Repository Function: invoiceRepository.softDelete()
+  - Database Operation: update
+
+---
+## RESTORE INVOICE
+---
+* API Name: Restore Soft-Deleted Invoice
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/invoices/:id/restore
+* Description: Restore a previously soft-deleted invoice ticket.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN, CASE_MANAGER (CM can only restore own invoices)
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* URL Parameters:
+  - id: Required, UUID
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Invoice restored successfully."
+}
+* Business Logic: Nullify deletion columns. Audit logged.
+  - Controller Function: restoreInvoice()
+  - Service Function: invoiceService.restoreInvoice()
+  - Repository Function: invoiceRepository.restore()
+  - Database Operation: update
+
+---
+## ADD REMARK
+---
+* API Name: Add Observation Remark
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/invoices/:id/remark
+* Description: Append remark notes to the invoice audit trail.
+* Bearer Token Required: YES
+* Role Required: FINANCE_HEAD, SUPER_ADMIN
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* URL Parameters:
+  - id: Required, UUID
+* Complete Request Body:
+{
+  "remark": "Audited GST value against CBIC portal. Found correct."
+}
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Remark added successfully."
+}
+* Business Logic: Validate role. Append to Audit logs. Cannot edit previous matching logs.
+  - Controller Function: addRemark()
+  - Service Function: invoiceService.addRemark()
+
+-------------------------
+MODULE SUMMARY - INVOICES
+-------------------------
+Available APIs:
+  - POST /api/v1/invoices
+  - GET /api/v1/invoices
+  - GET /api/v1/invoices/:id
+  - PATCH /api/v1/invoices/:id/approve
+  - PATCH /api/v1/invoices/:id/reject
+  - DELETE /api/v1/invoices/:id
+  - POST /api/v1/invoices/:id/restore
+  - POST /api/v1/invoices/:id/remark
+Missing CRUD APIs:
+  - PUT /api/v1/invoices/:id (Edit invoice details is missing)
+Dependencies: Approved Vendor & Open PO required
+Required Database Tables: invoices, vendors, purchase_orders, audit_logs, notifications, users
+Required Roles: CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+Required Permissions: Review rights based on amount limits
+Testing Sequence: Create Invoice -> Get Invoice details -> Calculate Match -> Approve Invoice (TEAM_LEAD/MANAGER/FINANCE_HEAD) -> Soft Delete -> Restore
+
+======================================================
+MODULE : THREE-WAY MATCHING
+===========================
+Description: Compares Invoices vs Purchase Orders vs Goods Received Notes (GRN) fields.
+Purpose: Automated matching verification (16+ comparison points with tolerances).
+Required Role: CASE_MANAGER (trigger matching), SUPER_ADMIN (admin review)
+Required Authentication: YES (Bearer Access Token)
+Database Tables Used: three_way_matches, invoices, purchase_orders, users
+Prisma Models Used: ThreeWayMatch, Invoice, PurchaseOrder, User
+Controller: src/modules/three-way-matching/matching.controller.js
+Service: src/modules/three-way-matching/matching.service.js
+Repository: src/modules/three-way-matching/matching.repository.js
+Validation Files: src/modules/three-way-matching/matching.validation.js
+
+////////////////////////////////////////////////////
+THREE-WAY MATCHING MODULE - APIS
+////////////////////////////////////////////////////
+
+---
+## RUN THREE-WAY MATCHING
+---
+* API Name: Start Three-Way Matching
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/three-way-matching/start
+* Description: Perform matching validation rules (PO vs GRN vs Invoice lines) for a pending invoice.
+* Bearer Token Required: YES
+* Allowed Roles: CASE_MANAGER, SUPER_ADMIN
+* Complete Request Body:
+{
+  "invoiceId": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99"
+}
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Matching calculation completed.",
+  "data": {
+    "id": "match-uuid",
+    "invoice_id": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99",
+    "status": "MATCHED",
+    "match_accuracy": 100
+  }
+}
+
+---
+## GET MATCHING REPORT
+---
+* API Name: Fetch Three-Way Match Report
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/three-way-matching/invoice/:invoiceId
+* Description: Retrieve computed match comparison data.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "data": {
+    "invoice_id": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99",
+    "status": "MATCHED",
+    "match_accuracy": 100,
+    "po_matches": true,
+    "grn_matches": true,
+    "fields": {
+      "amounts": { "invoice": 9500, "po": 9500, "grn": 9500, "match": true }
+    }
+  }
+}
+
+---
+## APPROVE ADMIN MATCH REVIEW
+---
+* API Name: Approve Match Anomaly
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/invoices/:id/admin-review/approve
+* Description: Super Admin bypass override to approve unmatched invoice anomalies.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Admin review approved."
+}
+
+---
+## REJECT ADMIN MATCH REVIEW
+---
+* API Name: Reject Match Anomaly
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/invoices/:id/admin-review/reject
+* Description: Super Admin override to reject unmatched invoice anomalies.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Admin review rejected."
+}
+
+======================================================
+MODULE : PAYMENTS
+=================
+Description: Manages payment requests, disbursements, approvals, and logs.
+Purpose: Request and process payouts for approved invoices.
+Required Role: CASE_MANAGER, FINANCE_HEAD (create), FINANCE_HEAD (review, approve/reject/block)
+Required Authentication: YES (Bearer Access Token)
+Database Tables Used: payments, invoices, approval_logs, notifications, users
+Prisma Models Used: Payment, Invoice, ApprovalLog, Notification, User
+Controller: src/modules/payments/payment.controller.js
+Service: src/modules/payments/payment.service.js
+Repository: src/modules/payments/payment.repository.js
+Validation Files: src/modules/payments/payment.validation.js
+Middleware Used: auth.middleware.js, authorize.middleware.js, validate.middleware.js
+File Upload Middleware: None
+
+////////////////////////////////////////////////////
+PAYMENTS MODULE - APIS
+////////////////////////////////////////////////////
+
+---
+## CREATE PAYMENT REQUEST
+---
+* API Name: Create Payment Request
+* HTTP Method: POST
+* Complete Endpoint: /api/v1/payments
+* Description: Register a new payment request in 'pending' status.
+* Bearer Token Required: YES
+* Allowed Roles: CASE_MANAGER, FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Complete Request Body:
+{
+  "invoiceId": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99",
+  "amount": 9500.00,
+  "currency": "INR",
+  "paymentMethod": "NEFT",
+  "referenceNo": "REF-99112233",
+  "notes": "Urgent vendor payout"
+}
+  * Validation Rules:
+    - invoiceId: Required, UUID format
+    - amount: Optional (default: invoice amount)
+    - currency: Optional (default: invoice currency)
+    - paymentMethod: Optional, enum ('NEFT', 'RTGS', 'UPI', 'CHEQUE')
+* Success Response (Status: 201 Created):
+{
+  "success": true,
+  "message": "Payment request created successfully.",
+  "data": {
+    "id": "8fa211e0-02ba-42aa-b883-92f1ab12de99",
+    "invoice_id": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99",
+    "amount": "9500.00",
+    "status": "pending",
+    "created_by_id": "creator-uuid"
+  }
+}
+* Business Logic: Validate invoice is approved. Creator limits apply to CM. Create request.
+  - Controller Function: createPayment()
+  - Service Function: paymentService.createPayment()
+  - Repository Function: invoiceRepository.findById(), paymentRepository.create()
+  - Database Operation: findUnique, create
+* cURL Request:
+curl -X POST http://localhost:5000/api/v1/payments \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <CASE_MANAGER_JWT>" \
+  -d '{"invoiceId": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99"}'
+* Expected Status Codes: 201 (Created), 400 (Invoice not approved), 404 (Invoice not found), 409 (Payment already exists for invoice)
+
+---
+## GET ALL PAYMENTS
+---
+* API Name: List Payment Requests
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/payments
+* Description: Fetch active payment requests list. Scoped for CM.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Query Parameters:
+  - status (optional): enum ('pending', 'approved', 'rejected', 'blocked')
+  - invoiceId (optional): UUID
+  - page (optional): integer (default: 1)
+  - limit (optional): integer (default: 10)
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "payments": [
+    {
+      "id": "8fa211e0-02ba-42aa-b883-92f1ab12de99",
+      "invoice_id": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99",
+      "amount": "9500.00",
+      "status": "pending"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 10,
+  "totalPages": 1
+}
+* Business Logic: Get list of payments. Filter by creator for CM.
+  - Controller Function: getPayments()
+  - Service Function: paymentService.listPayments()
+  - Repository Function: paymentRepository.findAll()
+  - Database Operation: findMany, count
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/payments \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success)
+
+---
+## GET PAYMENT BY ID
+---
+* API Name: Get Payment Request details
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/payments/:id
+* Description: Fetch specific payment request data.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* URL Parameters:
+  - id: Required, UUID
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "data": {
+    "id": "8fa211e0-02ba-42aa-b883-92f1ab12de99",
+    "invoice_id": "2ba3fa9d-128a-40a1-a4fb-2234e9e0fa99",
+    "amount": "9500.00",
+    "status": "pending"
+  }
+}
+* Business Logic: Get payment. Ownership boundary checks apply for CM.
+  - Controller Function: getPaymentById()
+  - Service Function: paymentService.getPaymentById()
+  - Repository Function: paymentRepository.findById()
+  - Database Operation: findUnique
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/payments/8fa211e0-02ba-42aa-b883-92f1ab12de99 \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success), 404 (Not found)
+
+---
+## APPROVE PAYMENT
+---
+* API Name: Approve Payment Request
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/payments/:id/approve
+* Description: Approve payment and register reference transaction numbers.
+* Bearer Token Required: YES
+* Allowed Roles: FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <FINANCE_HEAD_JWT>
+* URL Parameters:
+  - id: Required, UUID
+* Complete Request Body:
+{
+  "remarks": "Confirmed ledger balance. Processing payout.",
+  "referenceNo": "TXN100293847"
+}
+  * Validation Rules:
+    - remarks: Optional, string
+    - referenceNo: Optional, string
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Payment approved successfully.",
+  "data": {
+    "id": "8fa211e0-02ba-42aa-b883-92f1ab12de99",
+    "status": "approved",
+    "reference_no": "TXN100293847",
+    "approved_by_id": "fm-uuid",
+    "approved_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Verify payment is pending, and invoice is approved. Update status. Log entry. Notify CM creator.
+  - Controller Function: approvePayment()
+  - Service Function: paymentService.reviewPayment()
+  - Repository Function: paymentRepository.findById(), paymentRepository.update(), approvalRepository.createLog()
+  - Database Operation: findUnique, update, create
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/payments/8fa211e0-02ba-42aa-b883-92f1ab12de99/approve \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <FINANCE_HEAD_JWT>" \
+  -d '{"referenceNo": "TXN100293847"}'
+* Expected Status Codes: 200 (Success), 400 (Not pending or invoice not approved), 404 (Not found)
+
+---
+## REJECT PAYMENT
+---
+* API Name: Reject Payment Request
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/payments/:id/reject
+* Description: Transition payment status to 'rejected'.
+* Bearer Token Required: YES
+* Allowed Roles: FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <FINANCE_HEAD_JWT>
+* URL Parameters:
+  - id: Required, UUID
+* Complete Request Body:
+{
+  "remarks": "Wrong bank details routing code."
+}
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Payment rejected successfully.",
+  "data": {
+    "id": "8fa211e0-02ba-42aa-b883-92f1ab12de99",
+    "status": "rejected",
+    "rejected_by_id": "fm-uuid",
+    "rejected_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Reject pending request. Write log. Notify CM creator.
+  - Controller Function: rejectPayment()
+  - Service Function: paymentService.reviewPayment()
+  - Repository Function: paymentRepository.findById(), paymentRepository.update(), approvalRepository.createLog()
+  - Database Operation: findUnique, update, create
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/payments/8fa211e0-02ba-42aa-b883-92f1ab12de99/reject \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <FINANCE_HEAD_JWT>" \
+  -d '{"remarks": "Wrong routing"}'
+* Expected Status Codes: 200 (Success)
+
+---
+## BLOCK PAYMENT
+---
+* API Name: Block Payment Request
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/payments/:id/block
+* Description: Transition payment status to 'blocked' to suspend transaction execution.
+* Bearer Token Required: YES
+* Allowed Roles: FINANCE_HEAD
+* Required Headers:
+  Content-Type: application/json
+  Authorization: Bearer <FINANCE_HEAD_JWT>
+* URL Parameters:
+  - id: Required, UUID
+* Complete Request Body:
+{
+  "remarks": "Auditing bank account credentials."
+}
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Payment blocked successfully.",
+  "data": {
+    "id": "8fa211e0-02ba-42aa-b883-92f1ab12de99",
+    "status": "blocked",
+    "blocked_by_id": "fm-uuid",
+    "blocked_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Block pending payment request. Log details. Notify creator.
+  - Controller Function: blockPayment()
+  - Service Function: paymentService.reviewPayment()
+  - Repository Function: paymentRepository.findById(), paymentRepository.update(), approvalRepository.createLog()
+  - Database Operation: findUnique, update, create
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/payments/8fa211e0-02ba-42aa-b883-92f1ab12de99/block \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <FINANCE_HEAD_JWT>" \
+  -d '{"remarks": "Blocked"}'
+* Expected Status Codes: 200 (Success)
+
+-------------------------
+MODULE SUMMARY - PAYMENTS
+-------------------------
+Available APIs:
+  - POST /api/v1/payments
+  - GET /api/v1/payments
+  - GET /api/v1/payments/:id
+  - PATCH /api/v1/payments/:id/approve
+  - PATCH /api/v1/payments/:id/reject
+  - PATCH /api/v1/payments/:id/block
+Missing CRUD APIs:
+  - PUT /api/v1/payments/:id (Update payment is missing)
+  - DELETE /api/v1/payments/:id (Delete payment is missing)
+Dependencies: Approved Invoice is required
+Required Database Tables: payments, invoices, approval_logs, notifications, users
+Required Roles: CASE_MANAGER, FINANCE_HEAD
+Required Permissions: Read/review/write scopes on payments
+Testing Sequence: Create Payment -> Get Payment details -> Approve Payment
+
+======================================================
+MODULE : APPROVALS
+==================
+Description: Logs state updates across all entities (vendors, invoices, payments).
+Purpose: Auditing and reviewing historic state transition validations.
+Required Role: SUPER_ADMIN, FINANCE_HEAD
+Required Authentication: YES (Bearer Access Token)
+Database Tables Used: approval_logs, users
+Prisma Models Used: ApprovalLog, User
+Controller: src/modules/approvals/approval.controller.js
+Service: src/modules/approvals/approval.service.js
+Repository: src/modules/approvals/approval.repository.js
+Validation Files: None
+Middleware Used: auth.middleware.js, authorize.middleware.js
+File Upload Middleware: None
+
+////////////////////////////////////////////////////
+APPROVALS MODULE - APIS
+////////////////////////////////////////////////////
+
+---
+## GET ALL APPROVALS
+---
+* API Name: List approval history logs
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/approvals
+* Description: Extract paginated lists of validation/approval actions.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Query Parameters:
+  - entityType (optional): string ('vendor', 'invoice', 'payment')
+  - entityId (optional): UUID
+  - action (optional): string
+  - performedById (optional): UUID
+  - page (optional): integer (default: 1)
+  - limit (optional): integer (default: 20)
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Approval history retrieved successfully.",
+  "logs": [
+    {
+      "id": "3c0293aa-990a-42aa-b881-229048a12399",
+      "entity_type": "vendor",
+      "entity_id": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+      "action": "approved",
+      "from_status": "pending",
+      "to_status": "approved",
+      "remarks": "Details match registry",
+      "created_at": "2026-06-30T10:15:00.000Z",
+      "performed_by": { "id": "fm-uuid", "email": "finance.head@vms.com" }
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 20,
+  "totalPages": 1
+}
+* Business Logic: Get all logs. Filter according to query arguments. Return page slice.
+  - Controller Function: getApprovalHistory()
+  - Service Function: approvalService.getApprovalHistory()
+  - Repository Function: approvalRepository.findAll()
+  - Database Operation: findMany, count
+* cURL Request:
+curl -X GET "http://localhost:5000/api/v1/approvals?entityType=vendor" \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success)
+
+---
+## GET APPROVAL HISTORY FOR ENTITY
+---
+* API Name: Get Entity Approval Logs
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/approvals/:entityType/:entityId
+* Description: Get full validation log history for a specific entity.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* URL Parameters:
+  - entityType: Required, string ('vendor', 'invoice', 'payment')
+  - entityId: Required, UUID format
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Approval history for vendor retrieved successfully.",
+  "data": [
+    {
+      "id": "3c0293aa-990a-42aa-b881-229048a12399",
+      "action": "approved",
+      "from_status": "pending",
+      "to_status": "approved",
+      "remarks": "Verified paperwork",
+      "created_at": "2026-06-30T10:15:00.000Z",
+      "performed_by": { "id": "fm-uuid", "email": "finance.head@vms.com" }
+    }
+  ]
+}
+* Business Logic: Match records from database by type and ID.
+  - Controller Function: getEntityHistory()
+  - Service Function: approvalService.getEntityHistory()
+  - Repository Function: approvalRepository.findByEntity()
+  - Database Operation: findMany
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/approvals/vendor/e2d5c3fa-a690-4a30-8902-6014fb501ba1 \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success)
+
+--------------------------
+MODULE SUMMARY - APPROVALS
+--------------------------
+Available APIs:
+  - GET /api/v1/approvals
+  - GET /api/v1/approvals/:entityType/:entityId
+Missing CRUD APIs: None (Logs are read-only)
+Dependencies: Entities must have logged actions
+Required Database Tables: approval_logs, users
+Required Roles: SUPER_ADMIN, FINANCE_HEAD
+Required Permissions: Read-only access to historic validation logs
+Testing Sequence: Run entity status update -> Retrieve history logs for entity
+
+======================================================
+MODULE : DASHBOARD
+==================
+Description: Extracts performance summaries and counts of actions pending.
+Purpose: Real-time status dashboards for all internal roles.
+Required Role: SUPER_ADMIN (system overview), All roles (me dashboard)
+Required Authentication: YES (Bearer Access Token)
+Database Tables Used: vendors, purchase_orders, invoices, payments, approval_logs, users
+Prisma Models Used: Vendor, PurchaseOrder, Invoice, Payment, ApprovalLog, User
+Controller: src/modules/dashboard/dashboard.controller.js
+Service: src/modules/dashboard/dashboard.service.js
+Repository: src/modules/dashboard/dashboard.repository.js
+Validation Files: None
+Middleware Used: auth.middleware.js, authorize.middleware.js
+File Upload Middleware: None
+
+////////////////////////////////////////////////////
+DASHBOARD MODULE - APIS
+////////////////////////////////////////////////////
+
+---
+## GET DASHBOARD OVERVIEW
+---
+* API Name: System Dashboard Overview
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/dashboard/overview
+* Description: Gather full system-wide counts and recent activities.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN
+* Required Headers:
+  Authorization: Bearer <SUPER_ADMIN_JWT>
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Dashboard overview retrieved successfully.",
+  "data": {
+    "vendors": { "pending": 3, "approved": 15, "blocked": 1, "total": 19 },
+    "purchaseOrders": { "pending": 2, "open": 10, "closed": 5, "cancelled": 1, "total": 18 },
+    "invoices": { "pending": 5, "approved": 20, "rejected": 2, "total": 27 },
+    "payments": { "pending": 2, "approved": 12, "rejected": 1, "blocked": 0, "total": 15 },
+    "recentActivity": [
+      { "id": "log-uuid", "action": "approved", "entity_type": "vendor", "created_at": "2026-06-30T10:15:00Z" }
+    ]
+  }
+}
+* Business Logic: Gather counts from all tables. Extract recent 10 activity log entries.
+  - Controller Function: getOverview()
+  - Service Function: dashboardService.getOverviewDashboard()
+  - Repository Function: dashboardRepository.getVendorStats(), po stats, invoice stats, payment stats, getRecentActivity()
+  - Database Operation: count, findMany
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/dashboard/overview \
+  -H "Authorization: Bearer <SUPER_ADMIN_JWT>"
+* Expected Status Codes: 200 (Success)
+
+---
+## GET ROLE DASHBOARD
+---
+* API Name: Get My Dashboard Metrics
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/dashboard/me
+* Description: Retrieve metrics showing pending actions count for the logged-in role.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Your dashboard loaded successfully.",
+  "data": {
+    "summary": {
+      "vendors": { "pending": 3, "approved": 15, "total": 19 },
+      "purchaseOrders": { "total": 18 },
+      "invoices": { "total": 27 },
+      "payments": { "total": 15 }
+    },
+    "pendingActions": { "count": 4 },
+    "recentActivity": [
+      { "id": "log-uuid", "action": "created", "entity_type": "invoice" }
+    ]
+  }
+}
+* Business Logic: Retrieve dashboard metrics. Count pending items requiring action by user role:
+  - CASE_MANAGER: Counts of own drafts.
+  - FINANCE_HEAD: Count of pending vendors, POs, payments, and observations.
+  - TEAM_LEAD/MANAGER/FINANCE_HEAD: Count of pending invoices at matching amount range.
+  - Controller Function: getMyDashboard()
+  - Service Function: dashboardService.getRoleDashboard()
+  - Repository Function: dashboardRepository.getPendingCountsForRole(), etc.
+  - Database Operation: count, findMany
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/dashboard/me \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success)
+
+--------------------------
+MODULE SUMMARY - DASHBOARD
+--------------------------
+Available APIs:
+  - GET /api/v1/dashboard/overview
+  - GET /api/v1/dashboard/me
+Missing CRUD APIs: None (Dashboards are read-only)
+Dependencies: Overall databases
+Required Database Tables: vendors, purchase_orders, invoices, payments, approval_logs
+Required Roles: All roles
+Required Permissions: Read-only dashboards
+Testing Sequence: Query me dashboard across different roles to verify dynamic counts
+
+======================================================
+MODULE : AUDIT LOGS
+===================
+Description: Tracks low-level CRUD modifications for compliance records.
+Purpose: System-wide audit logging.
+Required Role: SUPER_ADMIN
+Required Authentication: YES (SUPER_ADMIN Bearer Token)
+Database Tables Used: approval_logs, users
+Prisma Models Used: ApprovalLog, User
+Controller: src/modules/audit-logs/audit.controller.js
+Service: src/modules/audit-logs/audit.service.js
+Repository: src/modules/audit-logs/audit.repository.js
+Validation Files: None
+Middleware Used: auth.middleware.js, authorize.middleware.js
+File Upload Middleware: None
+
+////////////////////////////////////////////////////
+AUDIT LOGS MODULE - APIS
+////////////////////////////////////////////////////
+
+---
+## GET ALL AUDIT LOGS
+---
+* API Name: Get Paginated Audit Logs
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/audit-logs
+* Description: Retrieve paginated activity logs.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN
+* Required Headers:
+  Authorization: Bearer <SUPER_ADMIN_JWT>
+* Query Parameters:
+  - entityType (optional): string
+  - entityId (optional): UUID
+  - action (optional): string
+  - performedById (optional): UUID
+  - dateFrom (optional): string (ISO Date)
+  - dateTo (optional): string (ISO Date)
+  - page (optional): integer (default: 1)
+  - limit (optional): integer (default: 50)
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Audit logs retrieved successfully.",
+  "logs": [
+    {
+      "id": "a1f09bb9-9011-42ab-8c99-6238b172aee3",
+      "entity_type": "user",
+      "entity_id": "5cb8276f-ef87-4340-97eb-29177112ea11",
+      "action": "create",
+      "performed_by_id": "admin-uuid",
+      "created_at": "2026-06-30T10:15:00.000Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 50,
+  "totalPages": 1
+}
+* Business Logic: Query approval logs with filter constraints.
+  - Controller Function: getAuditLogs()
+  - Service Function: auditService.getAuditLogs()
+  - Repository Function: auditRepository.findAll()
+  - Database Operation: findMany, count
+* cURL Request:
+curl -X GET "http://localhost:5000/api/v1/audit-logs?limit=5" \
+  -H "Authorization: Bearer <SUPER_ADMIN_JWT>"
+* Expected Status Codes: 200 (Success)
+
+---
+## GET AUDIT LOG BY ID
+---
+* API Name: Get Specific Audit Log
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/audit-logs/:id
+* Description: Fetch detailed transaction history of a single log entry.
+* Bearer Token Required: YES
+* Role Required: SUPER_ADMIN
+* Required Headers:
+  Authorization: Bearer <SUPER_ADMIN_JWT>
+* URL Parameters:
+  - id: Required, UUID
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "data": {
+    "id": "a1f09bb9-9011-42ab-8c99-6238b172aee3",
+    "entity_type": "user",
+    "entity_id": "5cb8276f-ef87-4340-97eb-29177112ea11",
+    "action": "create",
+    "performed_by_id": "admin-uuid",
+    "remarks": "User creation log",
+    "created_at": "2026-06-30T10:15:00.000Z"
+  }
+}
+* Business Logic: Get log by primary key.
+  - Controller Function: getAuditLogById()
+  - Service Function: auditService.getAuditLogById()
+  - Repository Function: auditRepository.findById()
+  - Database Operation: findUnique
+* cURL Request:
+curl -X GET http://localhost:5000/api/v1/audit-logs/a1f09bb9-9011-42ab-8c99-6238b172aee3 \
+  -H "Authorization: Bearer <SUPER_ADMIN_JWT>"
+* Expected Status Codes: 200 (Success), 404 (Not found)
+
+---------------------------
+MODULE SUMMARY - AUDIT LOGS
+---------------------------
+Available APIs:
+  - GET /api/v1/audit-logs
+  - GET /api/v1/audit-logs/:id
+Missing CRUD APIs: None (Logs are read-only)
+Dependencies: None
+Required Database Tables: approval_logs
+Required Roles: SUPER_ADMIN
+Required Permissions: Read-only access to audit trail
+Testing Sequence: Query list -> Query individual log ID
+
+======================================================
+MODULE : NOTIFICATIONS
+======================
+Description: In-app real-time status updates issued to CMs when reviewer actions
+             are performed on their records.
+Purpose: Keep Case Managers updated on status approvals.
+Required Role: All roles
+Required Authentication: YES (Bearer Access Token)
+Database Tables Used: notifications, users
+Prisma Models Used: Notification, User
+Controller: src/modules/notifications/notification.controller.js
+Service: src/modules/notifications/notification.service.js
+Repository: src/modules/notifications/notification.repository.js
+Validation Files: None
+Middleware Used: auth.middleware.js, authorize.middleware.js
+File Upload Middleware: None
+
+////////////////////////////////////////////////////
+NOTIFICATIONS MODULE - APIS
+////////////////////////////////////////////////////
+
+---
+## GET ALL NOTIFICATIONS
+---
+* API Name: List User Notifications
+* HTTP Method: GET
+* Complete Endpoint: /api/v1/notifications
+* Description: Fetch paginated lists of updates.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, TEAM_LEAD, MANAGER, FINANCE_HEAD
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Query Parameters:
+  - isRead (optional): string ("true" or "false")
+  - page (optional): integer (default: 1)
+  - limit (optional): integer (default: 20)
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Notifications retrieved successfully.",
+  "notifications": [
+    {
+      "id": "d0a0b0c0-efaa-99bb-8201-1904bb987622",
+      "title": "Vendor Approved",
+      "message": "Your vendor \"ACRE Supplies Pvt Ltd\" has been approved.",
+      "type": "vendor_approved",
+      "entity_type": "vendor",
+      "entity_id": "e2d5c3fa-a690-4a30-8902-6014fb501ba1",
+      "is_read": false,
+      "created_at": "2026-06-30T10:15:00.000Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 20,
+  "totalPages": 1
+}
+* Business Logic: Select from DB. Filter by user_id of requester. Apply pagination page limit.
+  - Controller Function: getMyNotifications()
+  - Service Function: notificationService.getMyNotifications()
+  - Repository Function: notificationRepository.findAll()
+  - Database Operation: findMany, count
+* cURL Request:
+curl -X GET "http://localhost:5000/api/v1/notifications?isRead=false" \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success)
+
+---
+## MARK ALL READ
+---
+* API Name: Mark all notifications as read
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/notifications/read-all
+* Description: Mark all notifications for the requester as read.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, FINANCE_MANAGER, L1, L2, L3
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "All notifications marked as read."
+}
+* Business Logic: Update is_read to true and read_at to current date for all notification entities.
+  - Controller Function: markAllAsRead()
+  - Service Function: notificationService.markAllAsRead()
+  - Repository Function: notificationRepository.markAllAsRead()
+  - Database Operation: updateMany
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/notifications/read-all \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success)
+
+---
+## MARK ONE READ
+---
+* API Name: Mark notification as read
+* HTTP Method: PATCH
+* Complete Endpoint: /api/v1/notifications/:id/read
+* Description: Set is_read to true for a single notification.
+* Bearer Token Required: YES
+* Allowed Roles: SUPER_ADMIN, CASE_MANAGER, FINANCE_MANAGER, L1, L2, L3
+* Required Headers:
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+* URL Parameters:
+  - id: Required, UUID format
+* Success Response (Status: 200 OK):
+{
+  "success": true,
+  "message": "Notification marked as read."
+}
+* Business Logic: Check user ownership of notification. Set status.
+  - Controller Function: markAsRead()
+  - Service Function: notificationService.markAsRead()
+  - Repository Function: notificationRepository.markAsRead()
+  - Database Operation: updateMany (for safety of user ownership scope)
+* cURL Request:
+curl -X PATCH http://localhost:5000/api/v1/notifications/d0a0b0c0-efaa-99bb-8201-1904bb987622/read \
+  -H "Authorization: Bearer <JWT_ACCESS_TOKEN>"
+* Expected Status Codes: 200 (Success), 404 (Not found or does not belong to user)
+
+------------------------------
+MODULE SUMMARY - NOTIFICATIONS
+------------------------------
+Available APIs:
+  - GET /api/v1/notifications
+  - PATCH /api/v1/notifications/read-all
+  - PATCH /api/v1/notifications/:id/read
+Missing CRUD APIs: None (Notifications do not need delete/create routes)
+Dependencies: Action notifications fired internally
+Required Database Tables: notifications
+Required Roles: All roles
+Required Permissions: Read/write on own notification data
+Testing Sequence: Trigger status change -> Fetch notifications -> Mark read -> Mark all read
+
+======================================================
+CONFIG MODULE : ROLES
+=====================
+Description: Non-API configuration mapping system access roles.
+Required Roles: Configure statically inside source code.
+Database Tables Used: None
+Prisma Models Used: None
+Controller: None
+Service: None
+Repository: None
+Validation Files: src/zodSchema/auth.model.js
+Middleware Used: None
+
+------------------------
+ROLE SUMMARY
+------------------------
+Available Roles:
+  - SUPER_ADMIN
+  - CASE_MANAGER
+  - TEAM_LEAD
+  - MANAGER
+  - FINANCE_HEAD
+Missing CRUD APIs:
+  - POST /api/v1/roles (Create new system role dynamically)
+  - DELETE /api/v1/roles/:id (Delete system role)
+  - GET /api/v1/roles (List roles)
+Dependencies: None
+
+======================================================
+CONFIG MODULE : PERMISSIONS
+==========================
+Description: Non-API permissions configuration mapping actions to roles.
+Required Roles: SUPER_ADMIN
+Database Tables Used: None
+Prisma Models Used: None
+Controller: None
+Service: None
+Repository: None
+Validation Files: src/modules/auth/auth.permissions.js, src/modules/vendors/vendor.permissions.js, src/modules/users/user.permissions.js
+Middleware Used: None
+
+------------------------
+PERMISSION SUMMARY
+------------------------
+Available Hardcoded Scopes:
+  - AUTH.GET_PROFILE
+  - AUTH.CHANGE_PASSWORD
+  - AUTH.LOGOUT
+  - USER.MANAGE
+  - VENDOR.CREATE
+  - VENDOR.READ
+  - VENDOR.REVIEW
+  - ADMIN.ALL
+Missing CRUD APIs:
+  - POST /api/v1/permissions (Create dynamic permission)
+  - GET /api/v1/permissions (List permissions)
+Dependencies: None
+
+================================================================================
+13. REALISTIC TEST DATA (SEED & SCENARIOS)
+================================================================================
+ 
+Default Seed User (Auto-seeded on app startup):
+----------------------------------------------
+* Role: SUPER_ADMIN
+* Email: admin@vms.com
+* Password: Admin@123
+
+Generate/Use Following Test Users:
+----------------------------------
+1. Case Manager
+   * Email: case.manager@vms.com
+   * Password: CaseManager@123
+   * Role: CASE_MANAGER
+
+2. Finance Head
+   * Email: finance.head@vms.com
+   * Password: FinanceHead@123
+   * Role: FINANCE_HEAD
+
+3. Team Lead (Invoice Limit <= 10,000 INR)
+   * Email: team.lead@vms.com
+   * Password: TeamLead@123
+   * Role: TEAM_LEAD
+
+4. Manager (Invoice Limit <= 100,000 INR)
+   * Email: manager@vms.com
+   * Password: Manager@123
+   * Role: MANAGER
+
+Sample Invoice Scenarios for Routing Test:
+-------------------------------------------
+1. Invoice 1 (Requires TEAM_LEAD approval):
+   * Amount: 8500.00 (<= 10k Limit)
+   * Approved by: Team Lead
+
+2. Invoice 2 (Requires TEAM_LEAD -> MANAGER approval):
+   * Amount: 75000.00 (<= 100k Limit)
+   * Approved by: Team Lead, then Manager
+
+3. Invoice 3 (Requires TEAM_LEAD -> MANAGER -> FINANCE_HEAD approval):
+   * Amount: 220000.00 (> 100k Limit)
+   * Approved by: Team Lead, then Manager, then Finance Head
+
+================================================================================
+14. RECOMMENDED TESTING ORDER
+================================================================================
+
+Ensure testing is conducted in the following order to resolve foreign key constraints:
+
+1. POST /api/v1/auth/login
+   - Use default admin email/password. Retrieve `SUPER_ADMIN_JWT`.
+
+2. POST /api/v1/users (Run 4 times)
+   - Use `SUPER_ADMIN_JWT`.
+   - Create one Case Manager, one Finance Head, one Team Lead, and one Manager.
+
+3. POST /api/v1/auth/login
+   - Authenticate with the Case Manager credentials. Retrieve `CASE_MANAGER_JWT`.
+
+4. POST /api/v1/vendors
+   - Use `CASE_MANAGER_JWT`.
+   - Create Delta Logistics Pvt Ltd. The vendor will be in 'pending' status.
+
+5. POST /api/v1/auth/login
+   - Authenticate with the Finance Head credentials. Retrieve `FINANCE_HEAD_JWT`.
+
+6. PATCH /api/v1/vendors/:id/approve
+   - Use `FINANCE_HEAD_JWT` and vendor ID from step 4. Remarks: "PAN matches".
+   - Status updates to 'approved'.
+
+7. POST /api/v1/purchase-orders
+   - Use `CASE_MANAGER_JWT` (or `FINANCE_HEAD_JWT`).
+   - Create a PO of 45000.00 associated with the approved vendor. Retrieve `PO_ID`.
+
+8. PATCH /api/v1/purchase-orders/:id/status
+   - Use `FINANCE_HEAD_JWT` and PO ID from step 7.
+   - Update status to 'open'.
+
+9. POST /api/v1/invoices
+   - Use `CASE_MANAGER_JWT`.
+   - Create an invoice of amount 75000.00 linking the vendor ID and PO ID.
+   - Response contains `"required_approval_role": "TEAM_LEAD"`. Retrieve `INVOICE_ID`.
+
+10. POST /api/v1/auth/login (Team Lead Login)
+    - Authenticate as `team.lead@vms.com`. Retrieve `TEAM_LEAD_JWT`.
+
+11. PATCH /api/v1/invoices/:id/approve
+    - Use `TEAM_LEAD_JWT` and invoice ID.
+    - Status updates to 'PENDING_MANAGER'.
+
+12. POST /api/v1/auth/login (Manager Login)
+    - Authenticate as `manager@vms.com`. Retrieve `MANAGER_JWT`.
+
+13. PATCH /api/v1/invoices/:id/approve
+    - Use `MANAGER_JWT` and invoice ID.
+    - Status updates to 'APPROVED' (since amount 75000.00 is <= 100,000 INR).
+
+14. POST /api/v1/payments
+    - Use `CASE_MANAGER_JWT`.
+    - Create a payment request for the approved invoice. Retrieve `PAYMENT_ID`.
+
+15. PATCH /api/v1/payments/:id/approve
+    - Use `FINANCE_HEAD_JWT` and payment ID. Specify `referenceNo` transaction code.
+    - Status updates to 'approved'.
+
+16. GET /api/v1/dashboard/me
+    - Fetch from all accounts to verify correct pending actions count and metrics summaries.
+
+================================================================================
+15. MISSING APIs (GAPS & RECOMMENDATIONS)
+================================================================================
+
+During codebase analysis, the following structural gaps were discovered:
+
+1. DELETE /api/v1/vendors/:id (Hard/Soft Delete Vendor)
+   * Status: Missing. Zod schema `deleteVendorSchema` and repository function `softDelete` exist, but no route is bound.
+   * Recommendation: Add `router.delete('/:id', authorize(VENDOR_PERMISSIONS.REVIEW), vendorController.deleteVendor)` inside `vendor.routes.js`.
+
+2. PATCH /api/v1/vendors/:id/status (Toggle Active Status)
+   * Status: Missing. Inactive vendors can currently still be referenced.
+   * Recommendation: Add a toggle endpoint to deactivate/reactivate verified vendors.
+
+3. PUT /api/v1/purchase-orders/:id (Update PO Details)
+   * Status: Missing. Draft POs cannot be edited.
+   * Recommendation: Add a PUT endpoint with validators to edit details before status transitions to 'open'.
+
+4. DELETE /api/v1/purchase-orders/:id (Delete PO)
+   * Status: Missing.
+   * Recommendation: Enable soft delete for POs that are in 'pending' status.
+
+5. DELETE /api/v1/payments/:id
+   * Status: Missing. No way to clean up payments request records.
+   * Recommendation: Enable soft delete for payments that are in pending status.
+   * Note: DELETE /api/v1/invoices/:id is fully implemented under ticket soft-delete rules.
+
+================================================================================
+16. SECURITY REVIEW
+================================================================================
+
+1. Authentication
+   - Secured via JWT Access Tokens with short expiration times.
+   - Refresh tokens stored in DB for sliding-session invalidation.
+
+2. Authorization
+   - Controlled via role-based middleware (`authorize`).
+   - Route path scoping limits data leakages (e.g. Case Managers can only access records created by them, TEAM_LEAD/MANAGER/FINANCE_HEAD see only their assigned invoices).
+
+3. Rate Limiting
+   - Managed globally in Express. (Rate limiter setup exists in `src/app.js` via standard express-rate-limit).
+
+4. Input Validation
+   - Schema enforcement using Zod. Unsanitized properties are automatically stripped or throw 400 Bad Request before hitting controllers.
+
+5. SQL Injection Protection
+   - Handled via Prisma ORM parameterized queries. Native PostgreSQL statements are sanitized.
+
+6. XSS / Security Headers
+   - Helmet middleware is mounted globally to configure Content-Security-Policy (CSP), clickjacking, and mime-sniffing protection.
+
+7. CSRF Protection
+   - Not configured in current build. Add anti-CSRF token synchronization if frontend transitions from Bearer JWT in headers to HTTP-Only Cookie storage.
+
+8. File Upload Security
+   - Multer middleware is imported but unused in current endpoint list. Ensure MIME type validation is enforced on any future uploads folder implementation.
+
+================================================================================
+FINAL SUMMARY
+================================================================================
+
+1. COMPLETE API COUNT
+   * Total Endpoints      : 53
+   * GET Endpoints        : 20
+   * POST Endpoints       : 16
+   * PUT Endpoints        : 3
+   * PATCH Endpoints      : 13
+   * DELETE Endpoints     : 1
+
+2. PROTECTION SCOPE
+   * Protected APIs       : 47
+   * Public APIs          : 6 (Health, Login, Forgot Pass, Verify OTP, Reset Pass, Refresh Token)
+
+3. UNUSED CODEBASE FILES
+   * Unused Controllers: None
+   * Unused Routes:
+     - src/routes/index.js (Empty placeholder)
+   * Unused Validators:
+     - src/middleware/user.schema.js (Deprecated reference)
+     - src/middleware/vendor.schema.js (Deprecated reference)
+     - src/middleware/auth.schema.js (Empty placeholder)
+   * Unused Services: None
+   * Unused Repositories: None
+   * Unused Utilities:
+     - src/utils/api-response.js (Empty placeholder)
+     - src/utils/constants.js (Empty placeholder)
+     - src/utils/date-helper.js (Empty placeholder)
+     - src/utils/generate-id.js (Empty placeholder)
+     - src/utils/pagination.js (Empty placeholder)
+     - src/utils/payment-helper.js (Empty placeholder)
+   * Unused Middleware:
+     - src/middleware/authenticate.middleware.js (Duplicates protect middleware)
+     - src/middleware/validation.middleware.js (Duplicates validate middleware)
+     - src/middleware/audit.middleware.js (Empty placeholder)
+     - src/middleware/error.middleware.js (Empty placeholder)
+     - src/middleware/role.middleware.js (Empty placeholder)
+   * Unused Database schemas:
+     - src/zodSchema/user.model.js (Empty placeholder)
+   * Unused Prisma Models: None (All 7 defined models are actively referenced)
+
+4. ROUTE CONFLICTS & REDUNDANCY
+   * No overlapping duplicate registrations or path naming conflicts were found.
+   * Redundant auth validation libraries exist (e.g. validate.middleware.js vs validation.middleware.js) which should be consolidated.
+
+5. SECURITY RECOMMENDATIONS
+   * Set up dynamic token blacklisting or redis caching to support instant JWT access token revocation before expiration thresholds.
+   * Add automated SQL injection testing suites for raw DB interactions (if any are introduced later).
+   * Secure the upload destinations with sanitization constraints when Multer is implemented.
+
+6. TESTING RECOMMENDATIONS
+   * Run the test runner locally using 'node --test tests/user-entity.test.js' to assert model entity alignments.
+   * Load the postman configurations using the cURL template values outlined within each module definition.
+================================================================================

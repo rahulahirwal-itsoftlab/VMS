@@ -41,6 +41,7 @@ const Login = () => {
   const location = useLocation();
   const queryRedirect = new URLSearchParams(location.search).get("redirect");
   const queryFrom = new URLSearchParams(location.search).get("from");
+  const preservedRoute = queryRedirect || queryFrom;
   const getSanitizedRoute = (rawRoute, role) => {
     const fallback = getDashboardPathForRole(role);
     if (!rawRoute || typeof rawRoute !== "string") return fallback;

@@ -194,6 +194,7 @@ export const canDownloadDocument = (user) => {
 };
 
 export const canAccessPath = (user, pathname) => {
+  if (user?.role === ROLES.SUPER_ADMIN) return true;
   const matchedRoute = Object.keys(ROUTE_PERMISSIONS)
     .sort((a, b) => b.length - a.length)
     .find((route) => pathname.startsWith(route));

@@ -23,35 +23,17 @@ import notificationRoutes from './modules/notifications/notification.routes.js';
 import matchingRoutes from './modules/three-way-matching/matching.routes.js';
 import reportRoutes from './modules/reports/report.routes.js';
 import lookupRoutes from './modules/lookups/lookup.routes.js';
+import healthRoutes from './modules/health/health.routes.js';
 
 import ApiError from './utils/ApiError.js';
 import sanitizeObject from './utils/logSanitizer.js';
 import errorHandler from './middleware/error.middleware.js';
-import prisma from './config/prisma.js';
-
 
 const app = express();
 app.set('etag', false);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const APPLICATION_STARTED_AT = Date.now();
-const HEALTH_QUERY_TIMEOUT_MS = Number(process.env.HEALTH_QUERY_TIMEOUT_MS || 3000);
 const getRequestId = (req) => req.headers['x-request-id'] || randomUUID();
-const withTimeout = (promise, timeoutMs) => {
-  let timeoutId;
-  const timeout = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error('HEALTH_CHECK_TIMEOUT')), timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
-};
-
-const checkDatabaseHealth = async () => {
-  await withTimeout(prisma.$connect(), HEALTH_QUERY_TIMEOUT_MS);
-  const [result] = await withTimeout(prisma.$queryRawUnsafe('SELECT 1::int AS ok'), HEALTH_QUERY_TIMEOUT_MS);
-  if (result?.ok !== 1) {
-    throw new Error('HEALTH_CHECK_FAILED');
-  }
-};
 
 // ─── 1. Security & Global Middleware ─────────────────────────────────────────
 app.use(helmet({
@@ -150,88 +132,12 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-// ─── 4. Health Check ──────────────────────────────────────────────────────────
-app.get('/health', async (req, res) => {
-  const requestId = getRequestId(req);
-  const basePayload = {
-    success: true,
-    service: 'vms-backend',
-    environment: process.env.NODE_ENV || 'development',
-    uptimeSeconds: Math.floor((Date.now() - APPLICATION_STARTED_AT) / 1000),
-    timestamp: new Date().toISOString(),
-    requestId,
-  };
-
-  try {
-    await checkDatabaseHealth();
-    res.status(200).json({
-      ...basePayload,
-      status: 'ok',
-      database: 'connected',
-    });
-  } catch {
-    res.status(200).json({
-      ...basePayload,
-      status: 'degraded',
-      database: 'unavailable',
-    });
-  }
-});
+// ─── 4. Health Check Routes ───────────────────────────────────────────────────
+app.use('/health', healthRoutes);
+app.use('/api/health', healthRoutes);
+app.use('/api/v1/health', healthRoutes);
 
 // ─── 5. API Routes ────────────────────────────────────────────────────────────
-app.get('/health/ready', async (req, res) => {
-  const requestId = getRequestId(req);
-  try {
-    await checkDatabaseHealth();
-
-    res.status(200).json({
-      success: true,
-      status: 'ready',
-      checks: {
-        database: 'up',
-        application: 'ready',
-      },
-      timestamp: new Date().toISOString(),
-      requestId,
-    });
-  } catch {
-    res.status(503).json({
-      success: false,
-      status: 'not_ready',
-      checks: {
-        database: 'down',
-        application: 'not_ready',
-      },
-      message: 'The service is temporarily unavailable.',
-      timestamp: new Date().toISOString(),
-      requestId,
-    });
-  }
-});
-
-app.get('/api/v1/health/database', async (req, res) => {
-  const requestId = getRequestId(req);
-  try {
-    await checkDatabaseHealth();
-
-    res.status(200).json({
-      success: true,
-      status: 'ok',
-      database: 'connected',
-      timestamp: new Date().toISOString(),
-      requestId,
-    });
-  } catch {
-    res.status(503).json({
-      success: false,
-      status: 'degraded',
-      database: 'unavailable',
-      message: 'The service is temporarily unavailable.',
-      timestamp: new Date().toISOString(),
-      requestId,
-    });
-  }
-});
 
 app.use('/api/v1/auth',               authRoutes);
 app.use('/api/v1/users',              userRoutes);

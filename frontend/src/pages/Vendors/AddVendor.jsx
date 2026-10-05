@@ -22,7 +22,7 @@ const FieldError = ({ message }) => (
 const initialVendorForm = {
   companyName: "",
   vendorCategory: "Manufacturer",
-  vendorType: "",
+  vendorType: "Domestic",
   taxType: "Regular",
   cin: "",
   msmeNumber: "",
@@ -35,7 +35,7 @@ const initialVendorForm = {
   alternatePhone: "",
   website: "",
   department: "",
-  country: "",
+  country: "India",
   state: "",
   district: "",
   city: "",
@@ -48,8 +48,8 @@ const initialVendorForm = {
   accountNumber: "",
   ifscCode: "",
   bankBranch: "",
-  paymentTerms: "",
-  currency: "",
+  paymentTerms: "Net 30",
+  currency: "INR",
   status: "pending",
   notes: "",
 };
@@ -153,7 +153,7 @@ const AddVendor = () => {
     } catch (error) {
       const data = error?.response?.data;
       const status = error?.response?.status;
-      if (status === 409 && data?.errors && typeof data.errors === "object") {
+      if ((status === 409 || status === 400) && data?.errors && typeof data.errors === "object") {
         const fieldErrors = [];
         const labelMap = {
           companyName: "Company Name",
@@ -165,6 +165,26 @@ const AddVendor = () => {
           pan: "PAN Number",
           panNumber: "PAN Number",
           vendorCode: "Vendor Code",
+          addressLine1: "Address Line 1",
+          city: "City",
+          state: "State",
+          country: "Country",
+          zipCode: "Postal Code",
+          postalCode: "Postal Code",
+          contactPerson: "Contact Person",
+          contactDesignation: "Designation",
+          phone: "Phone Number",
+          alternatePhone: "Alternate Phone",
+          bankName: "Bank Name",
+          accountHolder: "Account Holder",
+          bankAccountNo: "Account Number",
+          accountNumber: "Account Number",
+          ifscCode: "IFSC Code",
+          bankBranch: "Bank Branch",
+          paymentTerms: "Payment Terms",
+          vendorType: "Vendor Type",
+          category: "Vendor Category",
+          vendorCategory: "Vendor Category",
         };
         const fieldMap = {
           email: "email",
@@ -176,6 +196,26 @@ const AddVendor = () => {
           companyName: "companyName",
           name: "companyName",
           vendorCode: "companyName",
+          addressLine1: "addressLine1",
+          city: "city",
+          state: "state",
+          country: "country",
+          zipCode: "postalCode",
+          postalCode: "postalCode",
+          contactPerson: "contactPerson",
+          contactDesignation: "designation",
+          phone: "phone",
+          alternatePhone: "alternatePhone",
+          bankName: "bankName",
+          accountHolder: "accountHolder",
+          bankAccountNo: "accountNumber",
+          accountNumber: "accountNumber",
+          ifscCode: "ifscCode",
+          bankBranch: "bankBranch",
+          paymentTerms: "paymentTerms",
+          vendorType: "vendorType",
+          category: "vendorCategory",
+          vendorCategory: "vendorCategory",
         };
         Object.entries(data.errors).forEach(([field, msg]) => {
           const formField = fieldMap[field] || field;
@@ -186,7 +226,7 @@ const AddVendor = () => {
           }
         });
         setValidationErrors(fieldErrors);
-        const mainMsg = data.message || "Vendor already exists with duplicate details.";
+        const mainMsg = data.message || "Please fix the validation errors.";
         notify.error(mainMsg);
         if (fieldErrors.length) {
           window.setTimeout(() => focusValidationField(fieldErrors[0].field, {}, validationPanelRef), 0);

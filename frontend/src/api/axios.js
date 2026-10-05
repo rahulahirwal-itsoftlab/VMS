@@ -4,6 +4,7 @@ import {
   broadcastAuthEvent,
   clearAuthSession,
   getAccessToken,
+  getRefreshToken,
   updateStoredTokens,
 } from "../services/authSession";
 
@@ -77,22 +78,23 @@ export const refreshAccessToken = async () => {
     return refreshPromise;
   }
 
-  refreshPromise ||= (async () => {
+  refreshPromise = (async () => {
     console.log("[AUTH] Access token refresh started");
 
+    const storedRefreshToken = getRefreshToken();
     const response = await axios.post(
       `${API_BASE_URL}/v1/auth/refresh-token`,
-      {},
+      { refreshToken: storedRefreshToken },
       {
         headers: { "Content-Type": "application/json" },
         withCredentials: true,
       }
     );
-    const { accessToken } = response.data?.data || {};
+    const { accessToken, refreshToken: newRefreshToken } = response.data?.data || {};
     if (!accessToken) {
       throw new Error("Refresh did not return an access token");
     }
-    updateStoredTokens(accessToken);
+    updateStoredTokens(accessToken, newRefreshToken);
     broadcastAuthEvent(AUTH_EVENTS.SESSION_UPDATED);
     console.log("[AUTH] Access token refresh successful");
     return accessToken;
@@ -146,12 +148,17 @@ api.interceptors.response.use(
       const refreshStatus = refreshError.response?.status;
       const refreshCode = refreshError.response?.data?.code;
 
-      if (refreshStatus === 503 || refreshCode === "DATABASE_UNAVAILABLE") {
+      if (
+        refreshStatus === 503 ||
+        refreshCode === "DATABASE_UNAVAILABLE" ||
+        !refreshError.response
+      ) {
+        console.log("[AUTH] Refresh failed due to network/server unavailability; preserving session");
         return Promise.reject(refreshError);
       }
 
       if (refreshStatus === 401 || refreshStatus === 403) {
-        console.log("[AUTH] Session expired");
+        console.log("[AUTH] Refresh failed with 401/403: Session expired or invalid");
         if (!originalRequest.__skipAuthClear) {
           clearAuthSession();
         }

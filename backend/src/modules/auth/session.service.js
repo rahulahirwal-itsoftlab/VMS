@@ -4,7 +4,7 @@ import { generateAuthTokens, hashToken, verifyRefreshToken } from "../../utils/j
 import { AUTH_MESSAGES } from "./auth.constants.js";
 import { USER_ACCOUNT_STATUS } from "../users/user-status.constants.js";
 
-const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 class SessionService {
   /**
@@ -28,7 +28,7 @@ class SessionService {
   }
 
   /**
-   * Validates the browser refresh session and issues a new access token.
+   * Validates the browser refresh session and issues a new access token and refresh token (sliding expiration).
    */
   async rotateSession({ oldRefreshToken, userAgent = null, ipAddress = null }) {
     if (!oldRefreshToken) {
@@ -43,13 +43,41 @@ class SessionService {
     }
 
     const oldHash = hashToken(oldRefreshToken);
-    const session = await prisma.userSession.findUnique({
+    const now = new Date();
+
+    let session = await prisma.userSession.findUnique({
       where: { token_hash: oldHash },
       include: { user: true },
     });
 
-    if (!session || !session.user) {
-      console.log("[AUTH] Refresh session revoked");
+    // Multi-tab grace period: if another tab refreshed the token within the last 45 seconds
+    if (!session) {
+      const recentSession = await prisma.userSession.findFirst({
+        where: {
+          user_id: decoded.id,
+          revoked_at: null,
+          updated_at: { gte: new Date(now.getTime() - 45 * 1000) },
+        },
+        include: { user: true },
+        orderBy: { updated_at: 'desc' },
+      });
+
+      if (
+        recentSession &&
+        recentSession.user &&
+        recentSession.user.status === USER_ACCOUNT_STATUS.ACTIVE &&
+        !recentSession.user.deleted_at &&
+        recentSession.expires_at > now
+      ) {
+        console.log("[AUTH] Refresh request matched recent active session within grace period");
+        const { accessToken, refreshToken: newRefreshToken } = generateAuthTokens(
+          recentSession.user.id,
+          recentSession.user.role,
+        );
+        return { accessToken, refreshToken: newRefreshToken, user: recentSession.user };
+      }
+
+      console.log("[AUTH] Refresh session revoked or not found");
       throw new ApiError(401, AUTH_MESSAGES.UNAUTHORIZED);
     }
 
@@ -59,33 +87,38 @@ class SessionService {
       throw new ApiError(401, AUTH_MESSAGES.UNAUTHORIZED);
     }
 
-    const now = new Date();
-
     if (session.revoked_at) {
       console.log("[AUTH] Session revoked");
       throw new ApiError(401, 'Session expired or invalidated. Please log in again.');
     }
-
-    console.log("[AUTH] Refresh session validated");
 
     if (session.expires_at < now) {
       console.log("[AUTH] Session expired");
       throw new ApiError(401, 'Session expired. Please log in again.');
     }
 
-    const { accessToken } = generateAuthTokens(user.id, user.role);
+    const { accessToken, refreshToken: newRefreshToken } = generateAuthTokens(user.id, user.role);
+    const newHash = hashToken(newRefreshToken);
+    const newExpiresAt = new Date(now.getTime() + REFRESH_TOKEN_TTL_MS);
 
     await prisma.userSession.update({
       where: { id: session.id },
       data: {
+        token_hash: newHash,
+        expires_at: newExpiresAt,
         user_agent: userAgent || session.user_agent,
         ip_address: ipAddress || session.ip_address,
         updated_at: now,
       },
     });
 
-    console.log("[AUTH] Access token issued");
-    return { accessToken, refreshToken: null, user };
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { refresh_token: newRefreshToken },
+    }).catch(() => {});
+
+    console.log("[AUTH] Sliding session window extended & tokens renewed");
+    return { accessToken, refreshToken: newRefreshToken, user };
   }
 
   /**

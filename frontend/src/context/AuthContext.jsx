@@ -12,8 +12,10 @@ import {
   clearAuthSession,
   getAccessToken,
   getStoredUser,
+  isTokenExpiringSoon,
   subscribeToAuthEvents,
 } from "../services/authSession";
+import { refreshAccessToken } from "../api/axios";
 
 export const AUTH_STATUS = {
   INITIALIZING: "INITIALIZING",
@@ -100,17 +102,42 @@ export const AuthProvider = ({ children }) => {
     return () => unsubscribe();
   }, []);
 
+  // Proactive background silent refresh loop (runs every 45s while authenticated)
+  useEffect(() => {
+    if (status !== AUTH_STATUS.AUTHENTICATED) return;
+
+    const checkAndRefresh = async () => {
+      const token = getAccessToken();
+      if (token && isTokenExpiringSoon(token, 300)) {
+        console.log("[AUTH] Access token expiring within threshold; performing proactive silent refresh");
+        try {
+          await refreshAccessToken();
+        } catch (err) {
+          console.log("[AUTH] Proactive silent refresh deferred:", err?.message || err);
+        }
+      }
+    };
+
+    const interval = setInterval(checkAndRefresh, 45000);
+    return () => clearInterval(interval);
+  }, [status]);
+
   useEffect(() => {
     const handleVisibilityChange = async () => {
-      if (document.visibilityState === "visible" && getAccessToken()) {
-        try {
-          const currentUser = await getCurrentUser();
-          if (currentUser) {
-            setUser(currentUser);
-            setStatus(AUTH_STATUS.AUTHENTICATED);
+      if (document.visibilityState === "visible" && status === AUTH_STATUS.AUTHENTICATED) {
+        const token = getAccessToken();
+        if (!token || isTokenExpiringSoon(token, 300)) {
+          console.log("[AUTH] Tab became active and token is expiring/expired; performing proactive refresh");
+          try {
+            await refreshAccessToken();
+            const currentUser = await getCurrentUser();
+            if (currentUser) {
+              setUser(currentUser);
+              setStatus(AUTH_STATUS.AUTHENTICATED);
+            }
+          } catch {
+            // Preserve state if network reconnecting
           }
-        } catch {
-          // If network is reconnecting or server is busy, preserve existing session state
         }
       }
     };
@@ -122,7 +149,7 @@ export const AuthProvider = ({ children }) => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("focus", handleVisibilityChange);
     };
-  }, []);
+  }, [status]);
 
   const login = async (credentials) => {
     const result = await loginService(credentials);

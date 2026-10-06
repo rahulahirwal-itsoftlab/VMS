@@ -1,0 +1,55 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo "AWS CodeBuild - VMS | Environment - ${ENVIRONMENT} | Project - ${PROJECT_NAME}"
+      - echo "Frontend Tag - ${FRONTEND_TAG} | Backend Tag - ${BACKEND_TAG}"
+
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - ECR_REGISTRY=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+
+      - aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+      - echo "ECR login successful"
+
+  build:
+    commands:
+      - echo "Downloading frontend environment file from S3..."
+      - aws s3 cp "s3://${S3_ENV_BUCKET}/${FRONTEND_SECRET_KEY}" ./frontend/.env
+      - test -s ./frontend/.env
+      - echo "Frontend environment file downloaded successfully"
+
+      - export VITE_API_URL=$(grep '^VITE_API_URL=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_API_BASE_URL=$(grep '^VITE_API_BASE_URL=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_COMPANY_NAME=$(grep '^VITE_COMPANY_NAME=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_COMPANY_ADDRESS=$(grep '^VITE_COMPANY_ADDRESS=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_COMPANY_CITY=$(grep '^VITE_COMPANY_CITY=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_COMPANY_STATE=$(grep '^VITE_COMPANY_STATE=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_COMPANY_COUNTRY=$(grep '^VITE_COMPANY_COUNTRY=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_COMPANY_PIN_CODE=$(grep '^VITE_COMPANY_PIN_CODE=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_COMPANY_EMAIL=$(grep '^VITE_COMPANY_EMAIL=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_COMPANY_PHONE=$(grep '^VITE_COMPANY_PHONE=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_COMPANY_WEBSITE=$(grep '^VITE_COMPANY_WEBSITE=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_COMPANY_GST=$(grep '^VITE_COMPANY_GST=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_COMPANY_PAN=$(grep '^VITE_COMPANY_PAN=' ./frontend/.env | cut -d '=' -f2-)
+      - export VITE_COMPANY_LOGO_URL=$(grep '^VITE_COMPANY_LOGO_URL=' ./frontend/.env | cut -d '=' -f2-)
+
+      - echo "Building Frontend Image"
+      - docker build --no-cache --build-arg VITE_API_URL="${VITE_API_URL}" --build-arg VITE_API_BASE_URL="${VITE_API_BASE_URL}" --build-arg VITE_COMPANY_NAME="${VITE_COMPANY_NAME}" --build-arg VITE_COMPANY_ADDRESS="${VITE_COMPANY_ADDRESS}" --build-arg VITE_COMPANY_CITY="${VITE_COMPANY_CITY}" --build-arg VITE_COMPANY_STATE="${VITE_COMPANY_STATE}" --build-arg VITE_COMPANY_COUNTRY="${VITE_COMPANY_COUNTRY}" --build-arg VITE_COMPANY_PIN_CODE="${VITE_COMPANY_PIN_CODE}" --build-arg VITE_COMPANY_EMAIL="${VITE_COMPANY_EMAIL}" --build-arg VITE_COMPANY_PHONE="${VITE_COMPANY_PHONE}" --build-arg VITE_COMPANY_WEBSITE="${VITE_COMPANY_WEBSITE}" --build-arg VITE_COMPANY_GST="${VITE_COMPANY_GST}" --build-arg VITE_COMPANY_PAN="${VITE_COMPANY_PAN}" --build-arg VITE_COMPANY_LOGO_URL="${VITE_COMPANY_LOGO_URL}" -t ${ECR_REGISTRY}/${PROJECT_NAME}-frontend:${FRONTEND_TAG} ./frontend
+
+      - echo "Building Backend Image"
+      - docker build -t ${ECR_REGISTRY}/${PROJECT_NAME}-backend:${BACKEND_TAG} ./backend
+
+  post_build:
+    commands:
+      - echo "Pushing Frontend Image"
+      - docker push ${ECR_REGISTRY}/${PROJECT_NAME}-frontend:${FRONTEND_TAG}
+
+      - echo "Pushing Backend Image"
+      - docker push ${ECR_REGISTRY}/${PROJECT_NAME}-backend:${BACKEND_TAG}
+
+      - rm -f ./frontend/.env
+
+      - echo "CodeBuild Completed"
+      - echo "Frontend image - ${ECR_REGISTRY}/${PROJECT_NAME}-frontend:${FRONTEND_TAG}"
+      - echo "Backend image - ${ECR_REGISTRY}/${PROJECT_NAME}-backend:${BACKEND_TAG}"

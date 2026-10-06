@@ -111,6 +111,14 @@ const AppRoutes = () => {
     <Routes>
       {/* Auth Routes */}
       <Route path="/login" element={renderLazyRoute(Login, "Loading login...")} />
+      <Route path="/api/health" element={JSON.stringify(
+        {
+          status:"ok",
+          message:"Service is Running",
+          time:new Date(),
+          
+        }
+      )} />
       <Route path="/forgot-password" element={renderLazyRoute(ForgotPassword, "Loading password reset...")} />
       <Route path="/reset-password" element={renderLazyRoute(ResetPassword, "Loading password reset...")} />
       <Route path="/activate-account" element={renderLazyRoute(ActivateAccount, "Loading activation...")} />

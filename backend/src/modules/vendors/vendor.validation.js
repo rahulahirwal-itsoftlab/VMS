@@ -28,8 +28,13 @@ const mapSnakeToCamel = (val) => {
   const mapped = { ...val };
   const keysMap = {
     tax_id: 'taxId',
+    gst_number: 'gstNumber',
+    gst: 'gstNumber',
     pan_number: 'panNumber',
+    pan: 'panNumber',
     zip_code: 'zipCode',
+    postal_code: 'zipCode',
+    postalCode: 'zipCode',
     address_line1: 'addressLine1',
     address_line2: 'addressLine2',
     vendor_type: 'vendorType',
@@ -37,10 +42,12 @@ const mapSnakeToCamel = (val) => {
     tax_type: 'taxType',
     contact_person: 'contactPerson',
     contact_designation: 'contactDesignation',
+    designation: 'contactDesignation',
     alternate_phone: 'alternatePhone',
     bank_name: 'bankName',
     account_holder: 'accountHolder',
     bank_account_no: 'bankAccountNo',
+    accountNumber: 'bankAccountNo',
     ifsc_code: 'ifscCode',
     bank_branch: 'bankBranch',
     payment_terms: 'paymentTerms',
@@ -50,6 +57,51 @@ const mapSnakeToCamel = (val) => {
       mapped[camel] = val[snake];
     }
   }
+
+  // Cross-fill GST / Tax ID fields
+  const gstVal = mapped.taxId || mapped.gstNumber || mapped.gst || val.tax_id || val.gst_number || val.gst;
+  if (gstVal && typeof gstVal === 'string' && gstVal.trim()) {
+    mapped.taxId = gstVal.trim();
+    mapped.gstNumber = gstVal.trim();
+  }
+
+  // Convert empty strings to undefined so Zod .optional() and .default() work as expected
+  for (const key of Object.keys(mapped)) {
+    if (typeof mapped[key] === 'string' && mapped[key].trim() === '') {
+      mapped[key] = undefined;
+    }
+  }
+
+  // Normalize Enum strings
+  if (mapped.category) {
+    const c = String(mapped.category).trim().toLowerCase();
+    if (c === 'manufacturer') mapped.category = 'Manufacturer';
+    else if (c === 'supplier') mapped.category = 'Supplier';
+    else if (c === 'distributor') mapped.category = 'Distributor';
+    else if (c === 'service provider' || c === 'service_provider' || c === 'service-provider') mapped.category = 'Service Provider';
+  }
+
+  if (mapped.vendorType) {
+    const vt = String(mapped.vendorType).trim().toLowerCase();
+    if (vt === 'domestic') mapped.vendorType = 'Domestic';
+    else if (vt === 'international') mapped.vendorType = 'International';
+  }
+
+  if (mapped.taxType) {
+    const tt = String(mapped.taxType).trim().toLowerCase();
+    if (tt === 'regular') mapped.taxType = 'Regular';
+    else if (tt === 'composition') mapped.taxType = 'Composition';
+    else if (tt === 'exempt') mapped.taxType = 'Exempt';
+  }
+
+  if (mapped.paymentTerms) {
+    const pt = String(mapped.paymentTerms).trim().toLowerCase();
+    if (pt === 'net 15' || pt === 'net15') mapped.paymentTerms = 'Net 15';
+    else if (pt === 'net 30' || pt === 'net30') mapped.paymentTerms = 'Net 30';
+    else if (pt === 'net 45' || pt === 'net45') mapped.paymentTerms = 'Net 45';
+    else if (pt === 'net 60' || pt === 'net60') mapped.paymentTerms = 'Net 60';
+  }
+
   return mapped;
 };
 

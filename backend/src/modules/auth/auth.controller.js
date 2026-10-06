@@ -2,7 +2,7 @@ import authService from "./auth.service.js";
 import { AUTH_MESSAGES } from "./auth.constants.js";
 import asyncHandler from "../../middleware/asyncHandler.middleware.js";
 
-const getCookieOptions = (maxAgeMs = 7 * 24 * 60 * 60 * 1000) => {
+const getCookieOptions = (maxAgeMs = 30 * 24 * 60 * 60 * 1000) => {
   const isProduction = process.env.NODE_ENV === 'production';
   return {
     httpOnly: true,
@@ -42,15 +42,16 @@ class AuthController {
       });
     }
 
-    res.cookie('vms_access_token', result.accessToken, getCookieOptions(15 * 60 * 1000));
+    res.cookie('vms_access_token', result.accessToken, getCookieOptions(60 * 60 * 1000));
 
     if (result.refreshToken) {
-      res.cookie('vms_refresh_token', result.refreshToken, getCookieOptions(7 * 24 * 60 * 60 * 1000));
+      res.cookie('vms_refresh_token', result.refreshToken, getCookieOptions(30 * 24 * 60 * 60 * 1000));
     }
 
     const safeData = {
       user: result.user,
       accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
     };
 
     console.log("[AUTH] Login successful");
@@ -93,16 +94,16 @@ class AuthController {
     const { accessToken, refreshToken, user } =
       await authService.refreshToken(oldRefreshToken, meta);
 
-    res.cookie('vms_access_token', accessToken, getCookieOptions(15 * 60 * 1000));
+    res.cookie('vms_access_token', accessToken, getCookieOptions(60 * 60 * 1000));
 
     if (refreshToken) {
-      res.cookie('vms_refresh_token', refreshToken, getCookieOptions(7 * 24 * 60 * 60 * 1000));
+      res.cookie('vms_refresh_token', refreshToken, getCookieOptions(30 * 24 * 60 * 60 * 1000));
     }
 
     res.status(200).json({
       success: true,
       message: AUTH_MESSAGES.REFRESH_SUCCESS,
-      data: { accessToken, user },
+      data: { accessToken, refreshToken, user },
     });
   });
 
@@ -193,10 +194,10 @@ class AuthController {
   completeTemporaryPasswordChange = asyncHandler(async (req, res) => {
     const { passwordChangeToken, newPassword } = req.body;
     const result = await authService.completeTemporaryPasswordChange(passwordChangeToken, newPassword);
-    res.cookie('vms_access_token', result.accessToken, getCookieOptions(15 * 60 * 1000));
+    res.cookie('vms_access_token', result.accessToken, getCookieOptions(60 * 60 * 1000));
 
     if (result.refreshToken) {
-      res.cookie('vms_refresh_token', result.refreshToken, getCookieOptions(7 * 24 * 60 * 60 * 1000));
+      res.cookie('vms_refresh_token', result.refreshToken, getCookieOptions(30 * 24 * 60 * 60 * 1000));
     }
 
     res.status(200).json({
@@ -205,6 +206,7 @@ class AuthController {
       data: {
         user: result.user,
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
       },
     });
   });

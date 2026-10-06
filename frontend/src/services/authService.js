@@ -58,7 +58,7 @@ const getSafeAuthErrorMessage = (err) => {
 export const login = async ({ email, password, rememberMe }) => {
   try {
     const res = await api.post("/v1/auth/login", { email, password });
-    const { user, accessToken, requiresPasswordChange, passwordChangeToken } = res.data?.data || {};
+    const { user, accessToken, refreshToken, requiresPasswordChange, passwordChangeToken } = res.data?.data || {};
 
     if (requiresPasswordChange && passwordChangeToken) {
       sessionStorage.setItem(PASSWORD_CHANGE_TOKEN_KEY, passwordChangeToken);
@@ -69,7 +69,7 @@ export const login = async ({ email, password, rememberMe }) => {
       return { success: false, message: "Login failed" };
     }
 
-    setTokenStorage(rememberMe, accessToken);
+    setTokenStorage(rememberMe, accessToken, refreshToken);
     setStoredUser(user);
 
     return { success: true, user };
@@ -89,11 +89,11 @@ export const completeTemporaryPasswordChange = async ({ newPassword, confirmPass
     newPassword,
     confirmPassword,
   });
-  const { user, accessToken } = res.data?.data || {};
+  const { user, accessToken, refreshToken } = res.data?.data || {};
   if (!accessToken || !user) {
     return { success: false, message: "Password changed, but login session could not be created." };
   }
-  setTokenStorage(false, accessToken);
+  setTokenStorage(false, accessToken, refreshToken);
   setStoredUser(user);
   sessionStorage.removeItem(PASSWORD_CHANGE_TOKEN_KEY);
   return { success: true, user };

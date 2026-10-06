@@ -28,8 +28,13 @@ COPY --from=deps /app/prisma ./prisma
 
 COPY --chown=expressjs:nodejs . .
 
+# YEH NAYI LINE YAHAN ADD KAREIN:
+RUN mkdir -p /app/uploads/vendor-documents && chown -R expressjs:nodejs /app/uploads
+
 USER expressjs
 
 EXPOSE 5000
 
 CMD ["node", "src/server.js"]
+
+

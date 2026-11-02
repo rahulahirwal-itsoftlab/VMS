@@ -122,8 +122,7 @@ pipeline {
                         git fetch --tags origin
 
                         git fetch origin \
-                            '+refs/heads/main:refs/remotes/origin/main' \
-                            '+refs/heads/staging:refs/remotes/origin/staging'
+                            '+refs/heads/main:refs/remotes/origin/main'
                     '''
 
                     env.TAG_NAME = sh(

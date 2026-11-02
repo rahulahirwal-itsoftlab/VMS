@@ -7,7 +7,7 @@ pipeline {
         AWS_REGION = 'ap-south-1'
 
         FRONTEND_TASK_DEFINATION_FAMILY='itsoftlab-360-vms360-frontend'
-        BACKEND_TASK_DEFINATION_FAMILY='itsoftlab-360-backend'
+        BACKEND_TASK_DEFINATION_FAMILY='itsoftlab-360-vms360-backend'
 
         BACKEND_HEALTH_API='/api/health'
         FRONTEND_HEALTH_API='/api/health'

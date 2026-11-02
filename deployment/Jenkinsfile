@@ -74,26 +74,6 @@ pipeline {
         FRONTEND_TARGET_GROUP = 'vms360-frontend-tg'
         BACKEND_TARGET_GROUP = 'vms360-backend-tg'
 
-        // ==========================================
-        // NETWORK CONFIGURATION
-        // ==========================================
-
-        VPC_ID = 'vpc-08bb09e9a7c10b095'
-
-        SUBNET_1 = 'subnet-06fe5b3d8e95ad780'
-        SUBNET_2 = 'subnet-0cf9fd6f508540589'
-
-        SECURITY_GROUP_1 = 'sg-05e021221abdb240e'
-        SECURITY_GROUP_2 = 'sg-02f964fc431f9b80f'
-
-        // ==========================================
-        // IAM ROLES
-        // ==========================================
-
-        ECS_EXECUTION_ROLE_NAME = 'ecsTaskExecutionRole'
-        ECS_TASK_ROLE_NAME = 'ecsTaskRole'
-
-    }
     }
 
     stages {

@@ -2,13 +2,6 @@ pipeline {
 
     agent any
 
-    options {
-        timestamps()
-        disableConcurrentBuilds()
-        timeout(time: 90, unit: 'MINUTES')
-        skipDefaultCheckout(false)
-    }
-
     environment {
 
         // ==========================================
@@ -101,171 +94,112 @@ pipeline {
         ECS_TASK_ROLE_NAME = 'ecsTaskRole'
 
     }
+    }
 
     stages {
 
-        // ==========================================
-        // 1. VALIDATE GIT TAG
-        // ==========================================
-
         stage('Validate Git Tag') {
-
             steps {
-
                 script {
-
-                    echo 'Validating Git tag and deployment branch...'
-
-                    sh '''
-                        set -eu
-
-                        git fetch --tags origin
-
-                        git fetch origin \
-                            '+refs/heads/main:refs/remotes/origin/main'
-                    '''
-
-                    env.TAG_NAME = sh(
-                        script: '''
-                            git tag --points-at HEAD | sort -V | tail -n 1
-                        ''',
-                        returnStdout: true
-                    ).trim()
+                    // Use tag(s) pointing at HEAD to avoid picking an unrelated latest tag
+                    env.TAG_NAME = sh(script: 'git tag --points-at HEAD | sort -V | tail -n 1 || echo ""', returnStdout: true).trim()
 
                     if (!env.TAG_NAME) {
-                        error 'No Git tag detected at HEAD. Deployment requires a tagged commit.'
+                        error '❌ No tag detected! Deployment only triggers on tag creation.'
                     }
+                    echo "📌 Detected Tag: ${env.TAG_NAME}"
 
-                    echo "Detected Tag: ${env.TAG_NAME}"
-
-                    env.BRANCH = sh(
-                        script: """
-                            git branch -r --contains '${env.TAG_NAME}' |
-                            grep -Eo 'origin/(main|staging)' |
-                            head -n 1 |
-                            cut -d '/' -f2 || true
-                        """,
-                        returnStdout: true
-                    ).trim()
-
+                    // Extract branch from which the tag originated.
+                    env.BRANCH = sh(script: "git branch -r --contains ${env.TAG_NAME} | grep -Eo 'origin/(main|staging)' | head -n 1 | cut -d '/' -f2 || echo ''", returnStdout: true).trim()
                     if (!env.BRANCH) {
-                        error "Invalid tag. Tags must belong to main or staging."
+                        error "❌ Invalid tag! Tags must be from 'main', 'staging' branches."
                     }
 
-                    if (
-                        env.BRANCH == 'main' &&
-                        env.TAG_NAME ==~ /^v\\d+\\.\\d+\\.\\d+$/
-                    ) {
-
+                    if (env.BRANCH == 'main' && env.TAG_NAME ==~ /^v\d+\.\d+\.\d+$/) {
                         env.ENVIRONMENT = 'production'
-
-                    } else if (
-                        env.BRANCH == 'staging' &&
-                        env.TAG_NAME ==~ /^v\\d+\\.\\d+\\.\\d+-staging$/
-                    ) {
-
+                    } else if (env.BRANCH == 'staging' && env.TAG_NAME ==~ /^v\d+\.\d+\.\d+-staging$/) {
                         env.ENVIRONMENT = 'staging'
-
                     } else {
-
-                        error "Invalid tag format for branch '${env.BRANCH}'."
-
+                        error "❌ Invalid tag format for branch '${env.BRANCH}'."
                     }
-
-                    echo '============================================'
-                    echo 'GIT VALIDATION SUCCESSFUL'
-                    echo '============================================'
-                    echo "Project     : ${PROJECT_NAME}"
-                    echo "Branch      : ${env.BRANCH}"
-                    echo "Tag         : ${env.TAG_NAME}"
-                    echo "Environment : ${env.ENVIRONMENT}"
-                    echo '============================================'
-
+                    echo "🌍 Deployment Environment: ${env.ENVIRONMENT}"
+                    echo "Project: ${PROJECT_NAME}"
+                    echo "Branch: ${env.BRANCH}"
+                    echo "Tag: ${env.TAG_NAME}"
                 }
-
             }
-
         }
-
-        // ==========================================
-        // 2. CREATE DOCKER TAGS
-        // ==========================================
 
         stage('Create Docker Tags') {
-
             steps {
-
                 script {
-
                     env.BACKEND_TAG = "backend-${env.ENVIRONMENT}-${env.TAG_NAME}"
-
                     env.FRONTEND_TAG = "frontend-${env.ENVIRONMENT}-${env.TAG_NAME}"
-
-                    echo "Backend Docker Tag : ${env.BACKEND_TAG}"
-                    echo "Frontend Docker Tag: ${env.FRONTEND_TAG}"
-
+                    echo "🛠️ Backend Tag: ${env.BACKEND_TAG}"
+                    echo "🛠️ Frontend Tag: ${env.FRONTEND_TAG}"
                 }
-
             }
-
         }
 
-        // ==========================================
-        // 3. DETERMINE SECRET KEY FILE
-        // ==========================================
 
-        stage('Determine Secret Key File') {
-
+        stage('Determine secret key file') {
             steps {
-
                 script {
-
+                    // -------------------------------------------------
+                    // Make sure environment was determined correctly
+                    // -------------------------------------------------
                     if (!env.ENVIRONMENT) {
-                        error 'ENVIRONMENT is not available.'
+                        error """
+                        ❌ Secret key determination failed.
+
+                        ENVIRONMENT is not available.
+
+                        The 'Validate Git Tag' stage must complete
+                        successfully before this stage.
+                        """
                     }
 
                     if (env.ENVIRONMENT == 'production') {
 
-                        env.BACKEND_SECRET_KEY =
-                            "${env.BACKEND_PRODUCTION_ENV_S3_KEY}.env"
+                        env.BACKEND_SECRET_KEY = "${env.BACKEND_PRODUCTION_ENV_S3_KEY}.env"
 
-                        env.FRONTEND_SECRET_KEY =
-                            "${env.FRONTEND_PRODUCTION_ENV_S3_KEY}.env"
-
-                    } else if (env.ENVIRONMENT == 'staging') {
-
-                        env.BACKEND_SECRET_KEY =
-                            "${env.BACKEND_STAGING_ENV_S3_KEY}.env"
-
-                        env.FRONTEND_SECRET_KEY =
-                            "${env.FRONTEND_STAGING_ENV_S3_KEY}.env"
-
-                    } else {
-
-                        error "Unknown deployment environment: ${env.ENVIRONMENT}"
-
+                        env.FRONTEND_SECRET_KEY = "${env.FRONTEND_PRODUCTION_ENV_S3_KEY}.env"
                     }
 
-                    echo "Backend environment file : ${env.BACKEND_SECRET_KEY}"
-                    echo "Frontend environment file: ${env.FRONTEND_SECRET_KEY}"
+                    else if (env.ENVIRONMENT == 'staging') {
 
+                        env.BACKEND_SECRET_KEY = "${env.BACKEND_STAGING_ENV_S3_KEY}.env"
+
+                        env.FRONTEND_SECRET_KEY = "${env.FRONTEND_STAGING_ENV_S3_KEY}.env"
+                    }
+
+                    else {
+                        error "❌ Unknown deployment environment: ${env.ENVIRONMENT}"
+                    }
+
+                    echo "🔐 Backend env file: ${env.BACKEND_SECRET_KEY}"
+                    echo "🔐 Frontend env file: ${env.FRONTEND_SECRET_KEY}"
                 }
-
             }
-
         }
 
-        // ==========================================
-        // 4. CHECK AND TRIGGER CODEBUILD
-        // ==========================================
 
         stage('Check and Trigger AWS CodeBuild') {
-
             steps {
-
                 script {
 
-                    echo 'Checking AWS CodeBuild project...'
+                    echo "============================================"
+                    echo "AWS CodeBuild Validation & Trigger"
+                    echo "============================================"
+                    echo "Project     : ${PROJECT_NAME}"
+                    echo "Environment : ${ENVIRONMENT}"
+                    echo "AWS Region  : ${AWS_REGION}"
+                    echo "CodeBuild   : ${CODEBUILD_PROJECT_NAME}"
+                    echo "============================================"
+
+                    // -------------------------------------------------
+                    // Check CodeBuild project
+                    // -------------------------------------------------
 
                     def codeBuildStatus = sh(
                         script: """
@@ -278,21 +212,25 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
-                    if (
-                        !codeBuildStatus ||
+                    if (!codeBuildStatus ||
                         codeBuildStatus == 'None' ||
-                        codeBuildStatus == 'null'
-                    ) {
+                        codeBuildStatus == 'null') {
 
-                        error "AWS CodeBuild project not found: ${CODEBUILD_PROJECT_NAME}"
+                        error """
+                        ❌ AWS CodeBuild project not found.
 
+                        Project     : ${CODEBUILD_PROJECT_NAME}
+                        Environment : ${ENVIRONMENT}
+                        AWS Region  : ${AWS_REGION}
+                        AWS Account : ${AWS_ACCOUNT_ID}
+                        """
                     }
 
-                    echo "CodeBuild project exists: ${codeBuildStatus}"
+                    echo "✅ CodeBuild project exists: ${codeBuildStatus}"
 
-                    // ----------------------------------
-                    // CHECK BACKEND IMAGE
-                    // ----------------------------------
+                    // -------------------------------------------------
+                    // Check whether the exact images already exist
+                    // -------------------------------------------------
 
                     def backendExists = sh(
                         script: """
@@ -305,10 +243,6 @@ pipeline {
                         returnStatus: true
                     ) == 0
 
-                    // ----------------------------------
-                    // CHECK FRONTEND IMAGE
-                    // ----------------------------------
-
                     def frontendExists = sh(
                         script: """
                             aws ecr describe-images \
@@ -320,44 +254,25 @@ pipeline {
                         returnStatus: true
                     ) == 0
 
-                    // ----------------------------------
-                    // ECR IMAGE URLS
-                    // ----------------------------------
+                    env.ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-                    env.ECR_REGISTRY =
-                        "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-
-                    env.FRONTEND_IMAGE =
-                        "${env.ECR_REGISTRY}/${FRONTEND_ECR_REPOSITORY}:${env.FRONTEND_TAG}"
-
-                    env.BACKEND_IMAGE =
-                        "${env.ECR_REGISTRY}/${BACKEND_ECR_REPOSITORY}:${env.BACKEND_TAG}"
-
-                    // ----------------------------------
-                    // SKIP OR START CODEBUILD
-                    // ----------------------------------
+                    env.FRONTEND_IMAGE = "${env.ECR_REGISTRY}/${FRONTEND_ECR_REPOSITORY}:${env.FRONTEND_TAG}"
+                    env.BACKEND_IMAGE  = "${env.ECR_REGISTRY}/${BACKEND_ECR_REPOSITORY}:${env.BACKEND_TAG}"
 
                     if (backendExists && frontendExists) {
 
                         env.CODEBUILD_BUILD_ID = 'SKIPPED'
 
-                        echo 'Both exact Docker images already exist.'
-
+                        echo "✅ Both exact images already exist in ECR."
                         echo "Frontend: ${env.FRONTEND_IMAGE}"
                         echo "Backend : ${env.BACKEND_IMAGE}"
-
-                        echo 'Skipping CodeBuild.'
+                        echo "⏭️ Skipping CodeBuild."
 
                     } else {
 
+                        echo "🚀 Starting AWS CodeBuild..."
                         echo "Frontend image exists: ${frontendExists}"
                         echo "Backend image exists : ${backendExists}"
-
-                        echo 'Starting AWS CodeBuild...'
-
-                        // IMPORTANT:
-                        // CodeBuild must publish BOTH images, including
-                        // the image that already exists in ECR.
 
                         def buildId = sh(
                             script: """
@@ -380,46 +295,40 @@ pipeline {
                             returnStdout: true
                         ).trim()
 
-                        if (
-                            !buildId ||
+                        if (!buildId ||
                             buildId == 'None' ||
-                            buildId == 'null'
-                        ) {
+                            buildId == 'null') {
 
-                            error 'Failed to start AWS CodeBuild.'
-
+                            error "❌ Failed to start AWS CodeBuild."
                         }
-
                         env.CODEBUILD_BUILD_ID = buildId
 
-                        echo "CodeBuild started: ${env.CODEBUILD_BUILD_ID}"
-
+                        echo "✅ AWS CodeBuild started."
+                        echo "Build ID: ${env.CODEBUILD_BUILD_ID}"
                     }
 
+                    echo "============================================"
+                    echo "CodeBuild Result"
+                    echo "============================================"
+                    echo "Build ID      : ${env.CODEBUILD_BUILD_ID}"
+                    echo "Frontend Image: ${env.FRONTEND_IMAGE}"
+                    echo "Backend Image : ${env.BACKEND_IMAGE}"
+                    echo "============================================"
                 }
-
             }
-
         }
 
-        // ==========================================
-        // 5. WAIT FOR CODEBUILD
-        // ==========================================
 
         stage('Wait for AWS CodeBuild Completion') {
-
             when {
-
                 expression {
-                    env.CODEBUILD_BUILD_ID &&
-                    env.CODEBUILD_BUILD_ID != 'SKIPPED'
+                    env.CODEBUILD_BUILD_ID && env.CODEBUILD_BUILD_ID != 'SKIPPED'
                 }
-
             }
-
             steps {
-
                 script {
+
+                    echo "⏳ Waiting for AWS CodeBuild to complete..."
 
                     timeout(time: 30, unit: 'MINUTES') {
 
@@ -430,15 +339,15 @@ pipeline {
                             buildStatus = sh(
                                 script: """
                                     aws codebuild batch-get-builds \
-                                        --ids "${CODEBUILD_BUILD_ID}" \
-                                        --region "${AWS_REGION}" \
+                                        --ids ${CODEBUILD_BUILD_ID} \
+                                        --region ${AWS_REGION} \
                                         --query 'builds[0].buildStatus' \
                                         --output text
                                 """,
                                 returnStdout: true
                             ).trim()
 
-                            echo "CodeBuild Status: ${buildStatus}"
+                            echo "Build status: ${buildStatus}"
 
                             if ([
                                 'SUCCEEDED',
@@ -447,102 +356,55 @@ pipeline {
                                 'FAULT',
                                 'TIMED_OUT'
                             ].contains(buildStatus)) {
-
                                 break
-
                             }
 
-                            if (
-                                !buildStatus ||
-                                buildStatus == 'None' ||
-                                buildStatus == 'null'
-                            ) {
-
-                                error 'Unable to retrieve CodeBuild status.'
-
-                            }
-
-                            sleep(time: 10, unit: 'SECONDS')
-
+                            sleep 10
                         }
 
                         if (buildStatus != 'SUCCEEDED') {
-
-                            error "CodeBuild failed: ${buildStatus}"
-
+                            error "❌ AWS CodeBuild failed with status: ${buildStatus}"
                         }
 
-                        echo 'AWS CodeBuild completed successfully.'
-
+                        echo "✅ AWS CodeBuild completed successfully."
                     }
-
                 }
-
             }
-
         }
 
-        // ==========================================
-        // 6. VERIFY ECR IMAGES
-        // ==========================================
 
         stage('Verify ECR Images') {
-
             steps {
-
                 script {
 
-                    echo 'Verifying frontend and backend ECR images...'
+                    echo "🔍 Verifying frontend and backend images in ECR..."
 
-                    def frontendDigest = sh(
-                        script: """
-                            aws ecr describe-images \
-                                --repository-name ${FRONTEND_ECR_REPOSITORY} \
-                                --image-ids imageTag=${FRONTEND_TAG} \
-                                --region ${AWS_REGION} \
-                                --query 'imageDetails[0].imageDigest' \
-                                --output text
-                        """,
-                        returnStdout: true
-                    ).trim()
+                    sh """
+                        aws ecr describe-images \
+                            --repository-name ${FRONTEND_ECR_REPOSITORY} \
+                            --image-ids imageTag=${FRONTEND_TAG} \
+                            --region ${AWS_REGION} \
+                            --query 'imageDetails[0].imageTags' \
+                            --output text
+                    """
 
-                    def backendDigest = sh(
-                        script: """
-                            aws ecr describe-images \
-                                --repository-name ${BACKEND_ECR_REPOSITORY} \
-                                --image-ids imageTag=${BACKEND_TAG} \
-                                --region ${AWS_REGION} \
-                                --query 'imageDetails[0].imageDigest' \
-                                --output text
-                        """,
-                        returnStdout: true
-                    ).trim()
+                    sh """
+                        aws ecr describe-images \
+                            --repository-name ${BACKEND_ECR_REPOSITORY} \
+                            --image-ids imageTag=${BACKEND_TAG} \
+                            --region ${AWS_REGION} \
+                            --query 'imageDetails[0].imageTags' \
+                            --output text
+                    """
 
-                    if (
-                        !frontendDigest ||
-                        frontendDigest == 'None' ||
-                        backendDigest == 'None' ||
-                        !backendDigest
-                    ) {
+                    echo "✅ Both required ECR images are available."
 
-                        error 'Required frontend or backend ECR image is missing.'
-
-                    }
-
-                    echo "Frontend Image: ${env.FRONTEND_IMAGE}"
-                    echo "Backend Image : ${env.BACKEND_IMAGE}"
-
-                    echo 'Both ECR images verified successfully.'
-
+                    echo "Frontend image: ${FRONTEND_IMAGE}"
+                    echo "Backend image : ${BACKEND_IMAGE}"
                 }
-
             }
-
         }
 
-        // ==========================================
-        // 7. GENERATE FRONTEND TASK DEFINITION
-        // ==========================================
 
         stage('Generate Frontend Task Definition') {
 
@@ -550,115 +412,179 @@ pipeline {
 
                 script {
 
-                    env.FRONTEND_TASK_FAMILY =
-                        "${FRONTEND_TASK_DEFINITION_FAMILY}"
+                    echo "📝 Generating frontend ECS task definition..."
 
-                    env.FRONTEND_EXECUTION_ROLE =
-                        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${ECS_EXECUTION_ROLE_NAME}"
+                    // ==========================================
+                    // Frontend Task Definition Variables
+                    // ==========================================
 
-                    env.FRONTEND_TASK_ROLE =
-                        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${ECS_TASK_ROLE_NAME}"
+                    env.FRONTEND_TASK_FAMILY = "${FRONTEND_TASK_DEFINATION_FAMILY}"
 
-                    env.FRONTEND_LOG_GROUP =
-                        "/ecs/${FRONTEND_TASK_FAMILY}"
+                    env.FRONTEND_CONTAINER_NAME = "${PROJECT_NAME}-frontend"
 
-                    env.FRONTEND_ENV_FILE_ARN =
-                        "arn:aws:s3:::${S3_ENV_BUCKET}/${FRONTEND_SECRET_KEY}"
+                    env.FRONTEND_CONTAINER_PORT = "${FRONTEND_CONTAINER_PORT}"
 
-                    echo 'Generating frontend task definition...'
+                    env.FRONTEND_EXECUTION_ROLE = "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole"
+
+                    env.FRONTEND_TASK_ROLE = "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskRole"
+
+                    env.FRONTEND_LOG_GROUP =  "/ecs/${FRONTEND_TASK_FAMILY}"
+
+
+                    // ==========================================
+                    // S3 Environment File ARN
+                    // ==========================================
+
+                    env.FRONTEND_ENV_FILE_ARN = "arn:aws:s3:::its360-secure-env-file/${FRONTEND_SECRET_KEY}"
+
+
+                    echo "📦 Task Family      : ${FRONTEND_TASK_FAMILY}"
+                    echo "📦 Container        : ${FRONTEND_CONTAINER_NAME}"
+                    echo "📦 Image            : ${FRONTEND_IMAGE}"
+                    echo "📦 Container Port   : ${FRONTEND_CONTAINER_PORT}"
+                    echo "🔐 Environment File : ${FRONTEND_ENV_FILE_ARN}"
+                    echo "📋 Log Group        : ${FRONTEND_LOG_GROUP}"
+
+
+                    // ==========================================
+                    // Generate Task Definition JSON
+                    // ==========================================
 
                     sh """
-                        cat > frontend-task-definition.json <<'EOF'
-                        {
-                            "family": "${FRONTEND_TASK_FAMILY}",
-                            "executionRoleArn": "${FRONTEND_EXECUTION_ROLE}",
-                            "taskRoleArn": "${FRONTEND_TASK_ROLE}",
-                            "networkMode": "awsvpc",
-                            "requiresCompatibilities": ["FARGATE"],
-                            "cpu": "${FRONTEND_CPU}",
-                            "memory": "${FRONTEND_MEMORY}",
-                            "runtimePlatform": {
-                                "cpuArchitecture": "X86_64",
-                                "operatingSystemFamily": "LINUX"
-                            },
-                            "containerDefinitions": [
-                                {
-                                    "name": "${FRONTEND_CONTAINER_NAME}",
-                                    "image": "${FRONTEND_IMAGE}",
-                                    "cpu": 0,
-                                    "portMappings": [
-                                        {
-                                            "containerPort": ${FRONTEND_CONTAINER_PORT},
-                                            "hostPort": ${FRONTEND_CONTAINER_PORT},
-                                            "protocol": "tcp"
-                                        }
-                                    ],
-                                    "essential": true,
-                                    "environment": [],
-                                    "environmentFiles": [
-                                        {
-                                            "value": "${FRONTEND_ENV_FILE_ARN}",
-                                            "type": "s3"
-                                        }
-                                    ],
-                                    "mountPoints": [],
-                                    "volumesFrom": [],
-                                    "ulimits": [],
-                                    "logConfiguration": {
-                                        "logDriver": "awslogs",
-                                        "options": {
-                                            "awslogs-group": "${FRONTEND_LOG_GROUP}",
-                                            "awslogs-create-group": "true",
-                                            "awslogs-region": "${AWS_REGION}",
-                                            "awslogs-stream-prefix": "ecs"
-                                        }
-                                    },
-                                    "healthCheck": {
-                                        "command": [
-                                            "CMD-SHELL",
-                                            "curl -f http://127.0.0.1:${FRONTEND_CONTAINER_PORT}${FRONTEND_HEALTH_PATH} || exit 1"
-                                        ],
-                                        "interval": 30,
-                                        "timeout": 5,
-                                        "retries": 3,
-                                        "startPeriod": 10
-                                    }
-                                }
-                            ]
-                        }
-                        EOF
+        cat > frontend-task-definition.json <<EOF
+    {
+        "family": "${FRONTEND_TASK_FAMILY}",
 
+        "executionRoleArn": "${FRONTEND_EXECUTION_ROLE}",
+
+        "taskRoleArn": "${FRONTEND_TASK_ROLE}",
+
+        "networkMode": "awsvpc",
+
+        "requiresCompatibilities": [
+            "FARGATE"
+        ],
+
+        "cpu": "256",
+
+        "memory": "512",
+
+        "runtimePlatform": {
+            "cpuArchitecture": "X86_64",
+            "operatingSystemFamily": "LINUX"
+        },
+
+        "containerDefinitions": [
+            {
+                "name": "${FRONTEND_CONTAINER_NAME}",
+
+                "image": "${FRONTEND_IMAGE}",
+
+                "cpu": 0,
+
+                "portMappings": [
+                    {
+                        "containerPort": ${FRONTEND_CONTAINER_PORT},
+                        "hostPort": ${FRONTEND_CONTAINER_PORT},
+                        "protocol": "tcp",
+                        "name": "frontend-${FRONTEND_CONTAINER_PORT}-tcp",
+                        "appProtocol": "http"
+                    }
+                ],
+
+                "essential": true,
+
+                "environment": [],
+
+                "environmentFiles": [
+                    {
+                        "value": "${FRONTEND_ENV_FILE_ARN}",
+                        "type": "s3"
+                    }
+                ],
+
+                "mountPoints": [],
+
+                "volumesFrom": [],
+
+                "ulimits": [],
+
+                "logConfiguration": {
+                    "logDriver": "awslogs",
+
+                    "options": {
+                        "awslogs-group": "${FRONTEND_LOG_GROUP}",
+                        "awslogs-create-group": "true",
+                        "awslogs-region": "${AWS_REGION}",
+                        "awslogs-stream-prefix": "ecs"
+                    }
+                },
+
+                "healthCheck": {
+                    "command": [
+                        "CMD-SHELL",
+                        "curl -f http://localhost:${FRONTEND_CONTAINER_PORT}${FRONTEND_HEALTH_API} || exit 1"
+                    ],
+
+                    "interval": 30,
+                    "timeout": 5,
+                    "retries": 3,
+                    "startPeriod": 10
+                }
+            }
+        ]
+    }
+EOF
+"""
+
+
+                    // ==========================================
+                    // Validate Generated JSON
+                    // ==========================================
+
+                    echo "🔍 Validating generated task definition..."
+
+                    sh """
                         jq empty frontend-task-definition.json
                     """
 
-                    echo 'Frontend task definition generated successfully.'
+                    echo "✅ Frontend task definition JSON is valid."
+
+
+                    // ==========================================
+                    // Display Safe Configuration
+                    // ==========================================
+
+                    echo ""
+                    echo "=========================================="
+                    echo "✅ FRONTEND TASK DEFINITION GENERATED"
+                    echo "=========================================="
 
                     sh """
                         jq '{
                             family,
+                            executionRoleArn,
+                            networkMode,
+                            requiresCompatibilities,
                             cpu,
                             memory,
-                            networkMode,
+                            runtimePlatform,
                             containerDefinitions: [
                                 {
                                     name: .containerDefinitions[0].name,
                                     image: .containerDefinitions[0].image,
                                     portMappings: .containerDefinitions[0].portMappings,
+                                    environmentFiles: .containerDefinitions[0].environmentFiles,
                                     healthCheck: .containerDefinitions[0].healthCheck
                                 }
                             ]
                         }' frontend-task-definition.json
                     """
 
+                    echo "=========================================="
                 }
-
             }
-
         }
-
-        // ==========================================
-        // 8. GENERATE BACKEND TASK DEFINITION
-        // ==========================================
 
         stage('Generate Backend Task Definition') {
 
@@ -666,115 +592,184 @@ pipeline {
 
                 script {
 
-                    env.BACKEND_TASK_FAMILY =
-                        "${BACKEND_TASK_DEFINITION_FAMILY}"
+                    echo "📝 Generating backend ECS task definition..."
 
-                    env.BACKEND_EXECUTION_ROLE =
-                        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${ECS_EXECUTION_ROLE_NAME}"
+                    // ==========================================
+                    // Backend Task Definition Variables
+                    // ==========================================
 
-                    env.BACKEND_TASK_ROLE =
-                        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${ECS_TASK_ROLE_NAME}"
+                    env.BACKEND_TASK_FAMILY = "${BACKEND_TASK_DEFINATION_FAMILY}"
 
-                    env.BACKEND_LOG_GROUP =
-                        "/ecs/${BACKEND_TASK_FAMILY}"
+                    env.BACKEND_CONTAINER_NAME = "${PROJECT_NAME}-backend"
 
-                    env.BACKEND_ENV_FILE_ARN =
-                        "arn:aws:s3:::${S3_ENV_BUCKET}/${BACKEND_SECRET_KEY}"
+                    env.BACKEND_CONTAINER_PORT = "${BACKEND_CONTAINER_PORT}"
 
-                    echo 'Generating backend task definition...'
+                    env.BACKEND_EXECUTION_ROLE = "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole"
+                    env.BACKEND_TASK_ROLE = "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskRole"
+
+                    env.BACKEND_LOG_GROUP = "/ecs/${BACKEND_TASK_FAMILY}"
+
+
+                    // ==========================================
+                    // S3 Environment File ARN
+                    // ==========================================
+
+                    env.BACKEND_ENV_FILE_ARN =  "arn:aws:s3:::its360-secure-env-file/${BACKEND_SECRET_KEY}"
+
+
+                    // ==========================================
+                    // Display Configuration
+                    // ==========================================
+
+                    echo "📦 Task Family       : ${BACKEND_TASK_FAMILY}"
+                    echo "📦 Container         : ${BACKEND_CONTAINER_NAME}"
+                    echo "📦 Image             : ${BACKEND_IMAGE}"
+                    echo "📦 Container Port    : ${BACKEND_CONTAINER_PORT}"
+                    echo "🔐 Environment File  : ${BACKEND_ENV_FILE_ARN}"
+                    echo "📋 Log Group         : ${BACKEND_LOG_GROUP}"
+
+
+                    // ==========================================
+                    // Generate Backend Task Definition JSON
+                    // ==========================================
 
                     sh """
-cat > backend-task-definition.json <<'EOF'
-{
-    "family": "${BACKEND_TASK_FAMILY}",
-    "executionRoleArn": "${BACKEND_EXECUTION_ROLE}",
-    "taskRoleArn": "${BACKEND_TASK_ROLE}",
-    "networkMode": "awsvpc",
-    "requiresCompatibilities": ["FARGATE"],
-    "cpu": "${BACKEND_CPU}",
-    "memory": "${BACKEND_MEMORY}",
-    "runtimePlatform": {
-        "cpuArchitecture": "X86_64",
-        "operatingSystemFamily": "LINUX"
-    },
-    "containerDefinitions": [
-        {
-            "name": "${BACKEND_CONTAINER_NAME}",
-            "image": "${BACKEND_IMAGE}",
-            "cpu": 0,
-            "portMappings": [
-                {
-                    "containerPort": ${BACKEND_CONTAINER_PORT},
-                    "hostPort": ${BACKEND_CONTAINER_PORT},
-                    "protocol": "tcp"
-                }
-            ],
-            "essential": true,
-            "environment": [],
-            "environmentFiles": [
-                {
-                    "value": "${BACKEND_ENV_FILE_ARN}",
-                    "type": "s3"
-                }
-            ],
-            "mountPoints": [],
-            "volumesFrom": [],
-            "ulimits": [],
-            "logConfiguration": {
-                "logDriver": "awslogs",
-                "options": {
-                    "awslogs-group": "${BACKEND_LOG_GROUP}",
-                    "awslogs-create-group": "true",
-                    "awslogs-region": "${AWS_REGION}",
-                    "awslogs-stream-prefix": "ecs"
-                }
-            },
-            "healthCheck": {
-                "command": [
-                    "CMD-SHELL",
-                    "curl --fail --silent http://127.0.0.1:${BACKEND_CONTAINER_PORT}${BACKEND_HEALTH_PATH} > /dev/null || exit 1"
-                ],
-                "interval": 30,
-                "timeout": 5,
-                "retries": 3,
-                "startPeriod": 60
-            }
-        }
-    ]
-}
-EOF
+    cat > backend-task-definition.json <<EOF
 
+    {
+        "family": "${BACKEND_TASK_FAMILY}",
+
+        "executionRoleArn": "${BACKEND_EXECUTION_ROLE}",
+
+        "taskRoleArn": "${BACKEND_TASK_ROLE}",
+
+        "networkMode": "awsvpc",
+
+        "requiresCompatibilities": [
+            "FARGATE"
+        ],
+
+        "cpu": "256",
+
+        "memory": "512",
+
+        "runtimePlatform": {
+            "cpuArchitecture": "X86_64",
+            "operatingSystemFamily": "LINUX"
+        },
+
+        "containerDefinitions": [
+            {
+                "name": "${BACKEND_CONTAINER_NAME}",
+
+                "image": "${BACKEND_IMAGE}",
+
+                "cpu": 0,
+
+                "portMappings": [
+                    {
+                        "containerPort": ${BACKEND_CONTAINER_PORT},
+                        "hostPort": ${BACKEND_CONTAINER_PORT},
+                        "protocol": "tcp",
+                        "name": "backend-${BACKEND_CONTAINER_PORT}-tcp",
+                        "appProtocol": "http"
+                    }
+                ],
+
+                "essential": true,
+
+                "environment": [],
+
+                "environmentFiles": [
+                    {
+                        "value": "${BACKEND_ENV_FILE_ARN}",
+                        "type": "s3"
+                    }
+                ],
+
+                "mountPoints": [],
+
+                "volumesFrom": [],
+
+                "ulimits": [],
+
+                "logConfiguration": {
+                    "logDriver": "awslogs",
+
+                    "options": {
+                        "awslogs-group": "${BACKEND_LOG_GROUP}",
+                        "awslogs-create-group": "true",
+                        "awslogs-region": "${AWS_REGION}",
+                        "awslogs-stream-prefix": "ecs"
+                    }
+                },
+
+                "healthCheck": {
+                    "command": [
+                        "CMD-SHELL",
+                        "curl --fail --silent http://127.0.0.1:${BACKEND_CONTAINER_PORT}${BACKEND_HEALTH_API} > /dev/null || exit 1"
+                    ],
+                    "interval": 30,
+                    "timeout": 5,
+                    "retries": 3,
+                    "startPeriod": 60
+                }
+            }
+        ]
+    }
+
+EOF
+"""
+
+
+                    // ==========================================
+                    // Validate Generated JSON
+                    // ==========================================
+
+                    echo "🔍 Validating generated backend task definition..."
+
+                    sh """
                         jq empty backend-task-definition.json
                     """
 
-                    echo 'Backend task definition generated successfully.'
+                    echo "✅ Backend task definition JSON is valid."
+
+
+                    // ==========================================
+                    // Display Safe Configuration
+                    // ==========================================
+
+                    echo ""
+                    echo "=========================================="
+                    echo "✅ BACKEND TASK DEFINITION GENERATED"
+                    echo "=========================================="
 
                     sh """
                         jq '{
                             family,
+                            executionRoleArn,
+                            taskRoleArn,
+                            networkMode,
+                            requiresCompatibilities,
                             cpu,
                             memory,
-                            networkMode,
+                            runtimePlatform,
                             containerDefinitions: [
                                 {
                                     name: .containerDefinitions[0].name,
                                     image: .containerDefinitions[0].image,
                                     portMappings: .containerDefinitions[0].portMappings,
+                                    environmentFiles: .containerDefinitions[0].environmentFiles,
                                     healthCheck: .containerDefinitions[0].healthCheck
                                 }
                             ]
                         }' backend-task-definition.json
                     """
 
+                    echo "=========================================="
                 }
-
             }
-
         }
-
-        // ==========================================
-        // 9. REGISTER TASK DEFINITIONS
-        // ==========================================
 
         stage('Register Task Definitions') {
 
@@ -782,9 +777,15 @@ EOF
 
                 script {
 
-                    echo 'Registering frontend task definition...'
+                    echo "📋 Registering ECS task definitions..."
 
-                    def frontendTaskArn = sh(
+                    // ==========================================
+                    // Register Frontend Task Definition
+                    // ==========================================
+
+                    echo "🚀 Registering frontend task definition..."
+
+                    def frontendTaskDefinitionArn = sh(
                         script: """
                             aws ecs register-task-definition \
                                 --cli-input-json file://frontend-task-definition.json \
@@ -795,22 +796,23 @@ EOF
                         returnStdout: true
                     ).trim()
 
-                    if (
-                        !frontendTaskArn ||
-                        frontendTaskArn == 'None'
-                    ) {
-
-                        error 'Frontend task definition registration failed.'
-
+                    if (!frontendTaskDefinitionArn) {
+                        error "❌ Failed to register frontend task definition."
                     }
 
-                    env.FRONTEND_TASK_DEFINITION_ARN = frontendTaskArn
+                    env.FRONTEND_TASK_DEFINITION_ARN = frontendTaskDefinitionArn
 
-                    echo "Frontend Task: ${frontendTaskArn}"
+                    echo "✅ Frontend task definition registered:"
+                    echo "${env.FRONTEND_TASK_DEFINITION_ARN}"
 
-                    echo 'Registering backend task definition...'
 
-                    def backendTaskArn = sh(
+                    // ==========================================
+                    // Register Backend Task Definition
+                    // ==========================================
+
+                    echo "🚀 Registering backend task definition..."
+
+                    def backendTaskDefinitionArn = sh(
                         script: """
                             aws ecs register-task-definition \
                                 --cli-input-json file://backend-task-definition.json \
@@ -821,554 +823,161 @@ EOF
                         returnStdout: true
                     ).trim()
 
-                    if (
-                        !backendTaskArn ||
-                        backendTaskArn == 'None'
-                    ) {
-
-                        error 'Backend task definition registration failed.'
-
+                    if (!backendTaskDefinitionArn) {
+                        error "❌ Failed to register backend task definition."
                     }
 
-                    env.BACKEND_TASK_DEFINITION_ARN = backendTaskArn
+                    env.BACKEND_TASK_DEFINITION_ARN = backendTaskDefinitionArn
 
-                    echo "Backend Task: ${backendTaskArn}"
+                    echo "✅ Backend task definition registered:"
+                    echo "${env.BACKEND_TASK_DEFINITION_ARN}"
 
-                    echo 'Both task definitions registered successfully.'
 
+                    // ==========================================
+                    // Summary
+                    // ==========================================
+
+                    echo ""
+                    echo "=========================================="
+                    echo "✅ TASK DEFINITIONS REGISTERED"
+                    echo "=========================================="
+                    echo "Frontend:"
+                    echo "${env.FRONTEND_TASK_DEFINITION_ARN}"
+                    echo ""
+                    echo "Backend:"
+                    echo "${env.BACKEND_TASK_DEFINITION_ARN}"
+                    echo "=========================================="
                 }
-
             }
-
         }
 
-        // ==========================================
-        // 10. CREATE / UPDATE ECS SERVICES
-        // ==========================================
 
-        stage('Create/Update ECS Services') {
-
+        stage('Update ECS Services') {
             steps {
-
                 script {
+                    def clusterStatus = sh(
+                        script: "aws ecs describe-clusters --clusters ${ECS_CLUSTER} --region ${AWS_REGION} --query 'clusters[0].status' --output text",
+                        returnStdout: true
+                    ).trim()
+                    if (clusterStatus != 'ACTIVE') {
+                        error "❌ ECS cluster '${ECS_CLUSTER}' is not ACTIVE (status: ${clusterStatus})."
+                    }
 
-                    echo '============================================'
-                    echo 'VMS AWS INFRASTRUCTURE VALIDATION'
-                    echo '============================================'
+                    // Read-only lookups, needed by the Health Check stage
+                    env.FRONTEND_TARGET_GROUP_ARN = sh(
+                        script: "aws elbv2 describe-target-groups --names ${FRONTEND_TARGET_GROUP} --region ${AWS_REGION} --query 'TargetGroups[0].TargetGroupArn' --output text",
+                        returnStdout: true
+                    ).trim()
+                    env.BACKEND_TARGET_GROUP_ARN = sh(
+                        script: "aws elbv2 describe-target-groups --names ${BACKEND_TARGET_GROUP} --region ${AWS_REGION} --query 'TargetGroups[0].TargetGroupArn' --output text",
+                        returnStdout: true
+                    ).trim()
 
-                    // ----------------------------------
-                    // VALIDATE REQUIRED CONFIGURATION
-                    // ----------------------------------
-
-                    def requiredVariables = [
-                        'VPC_ID',
-                        'SUBNET_1',
-                        'SUBNET_2',
-                        'SECURITY_GROUP_1',
-                        'SECURITY_GROUP_2',
-                        'FRONTEND_TASK_DEFINITION_ARN',
-                        'BACKEND_TASK_DEFINITION_ARN'
+                    // Services must already exist; a deploy only rolls them to the new task definition
+                    def services = [
+                        [name: env.FRONTEND_SERVICE, taskDef: env.FRONTEND_TASK_DEFINITION_ARN],
+                        [name: env.BACKEND_SERVICE,  taskDef: env.BACKEND_TASK_DEFINITION_ARN]
                     ]
 
-                    requiredVariables.each { variable ->
-
-                        if (!env[variable]?.trim()) {
-                            error "Missing AWS configuration: ${variable}"
-                        }
-
-                    }
-
-                    // ----------------------------------
-                    // VALIDATE VPC AND CLUSTER
-                    // ----------------------------------
-
-                    def clusterStatus = sh(
-                        script: """
-                            aws ecs describe-clusters \
-                                --clusters ${ECS_CLUSTER} \
-                                --region ${AWS_REGION} \
-                                --query 'clusters[0].status' \
-                                --output text
-                        """,
-                        returnStdout: true
-                    ).trim()
-
-                    if (clusterStatus != 'ACTIVE') {
-                        error "ECS cluster is not ACTIVE: ${clusterStatus}"
-                    }
-
-                    def vpcStatus = sh(
-                        script: """
-                            aws ec2 describe-vpcs \
-                                --vpc-ids ${VPC_ID} \
-                                --region ${AWS_REGION} \
-                                --query 'Vpcs[0].State' \
-                                --output text
-                        """,
-                        returnStdout: true
-                    ).trim()
-
-                    if (vpcStatus != 'available') {
-                        error "VPC is not available: ${VPC_ID}"
-                    }
-
-                    echo 'ECS cluster and VPC validated.'
-
-                    // ----------------------------------
-                    // VERIFY SUBNETS BELONG TO VPC
-                    // ----------------------------------
-
-                    def subnetDetails = sh(
-                        script: """
-                            aws ec2 describe-subnets \
-                                --subnet-ids ${SUBNET_1} ${SUBNET_2} \
-                                --region ${AWS_REGION} \
-                                --query 'Subnets[].VpcId' \
-                                --output text
-                        """,
-                        returnStdout: true
-                    ).trim().tokenize()
-
-                    if (
-                        subnetDetails.size() != 2 ||
-                        subnetDetails.any { it != env.VPC_ID }
-                    ) {
-
-                        error 'Configured subnets do not belong to the configured VPC.'
-
-                    }
-
-                    // ----------------------------------
-                    // VERIFY SECURITY GROUPS
-                    // ----------------------------------
-
-                    def securityGroupVpcs = sh(
-                        script: """
-                            aws ec2 describe-security-groups \
-                                --group-ids ${SECURITY_GROUP_1} ${SECURITY_GROUP_2} \
-                                --region ${AWS_REGION} \
-                                --query 'SecurityGroups[].VpcId' \
-                                --output text
-                        """,
-                        returnStdout: true
-                    ).trim().tokenize()
-
-                    if (
-                        securityGroupVpcs.size() != 2 ||
-                        securityGroupVpcs.any { it != env.VPC_ID }
-                    ) {
-
-                        error 'Configured security groups do not belong to the VMS VPC.'
-
-                    }
-
-                    // ==================================
-                    // FRONTEND AND BACKEND ALB CREATION
-                    // ==================================
-
-                    def getOrCreateALB = { albName ->
-
-                        def arn = sh(
-                            script: """
-                                aws elbv2 describe-load-balancers \
-                                    --names ${albName} \
-                                    --region ${AWS_REGION} \
-                                    --query 'LoadBalancers[0].LoadBalancerArn' \
-                                    --output text 2>/dev/null || true
-                            """,
+                    for (svc in services) {
+                        def status = sh(
+                            script: "aws ecs describe-services --cluster ${ECS_CLUSTER} --services ${svc.name} --region ${AWS_REGION} --query 'services[0].status' --output text 2>/dev/null || true",
                             returnStdout: true
                         ).trim()
 
-                        if (!arn || arn == 'None') {
-
-                            echo "Creating ALB: ${albName}"
-
-                            arn = sh(
-                                script: """
-                                    aws elbv2 create-load-balancer \
-                                        --name ${albName} \
-                                        --type application \
-                                        --scheme internet-facing \
-                                        --subnets ${SUBNET_1} ${SUBNET_2} \
-                                        --security-groups ${SECURITY_GROUP_1} ${SECURITY_GROUP_2} \
-                                        --region ${AWS_REGION} \
-                                        --query 'LoadBalancers[0].LoadBalancerArn' \
-                                        --output text
-                                """,
-                                returnStdout: true
-                            ).trim()
-
-                        } else {
-
-                            echo "ALB already exists: ${albName}"
-
+                        if (status != 'ACTIVE') {
+                            error "❌ ECS service '${svc.name}' not found or not ACTIVE (status: '${status}'). Create it once manually."
                         }
 
-                        if (!arn || arn == 'None') {
-                            error "Failed to create/find ALB: ${albName}"
-                        }
-
-                        return arn
-
-                    }
-
-                    env.FRONTEND_LOAD_BALANCER_ARN =
-                        getOrCreateALB(env.FRONTEND_LOAD_BALANCER)
-
-                    env.BACKEND_LOAD_BALANCER_ARN =
-                        getOrCreateALB(env.BACKEND_LOAD_BALANCER)
-
-                    // ----------------------------------
-                    // WAIT FOR ALBS TO BECOME ACTIVE
-                    // ----------------------------------
-
-                    timeout(time: 10, unit: 'MINUTES') {
-
+                        echo "🔄 Updating ${svc.name} -> ${svc.taskDef}"
                         sh """
-                            aws elbv2 wait load-balancer-available \
-                                --load-balancer-arns ${FRONTEND_LOAD_BALANCER_ARN} ${BACKEND_LOAD_BALANCER_ARN} \
-                                --region ${AWS_REGION}
+                            aws ecs update-service \
+                                --cluster ${ECS_CLUSTER} \
+                                --service ${svc.name} \
+                                --task-definition ${svc.taskDef} \
+                                --force-new-deployment \
+                                --region ${AWS_REGION} \
+                                --query 'service.serviceName' --output text
                         """
+                    }
+                }
+            }
+        }
 
+
+        stage('Wait for ECS Stability') {
+            steps {
+                script {
+
+                    echo ""
+                    echo "=========================================="
+                    echo "⏳ WAITING FOR ECS SERVICES TO STABILIZE"
+                    echo "=========================================="
+
+                    // =========================================================
+                    // VALIDATE REQUIRED VARIABLES
+                    // =========================================================
+
+                    if (!env.ECS_CLUSTER) {
+                        error "❌ ECS_CLUSTER is not available."
                     }
 
-                    // ==================================
-                    // TARGET GROUP CREATION
-                    // ==================================
-
-                    def getOrCreateTargetGroup = {
-                        tgName,
-                        port,
-                        healthPath ->
-
-                        def arn = sh(
-                            script: """
-                                aws elbv2 describe-target-groups \
-                                    --names ${tgName} \
-                                    --region ${AWS_REGION} \
-                                    --query 'TargetGroups[0].TargetGroupArn' \
-                                    --output text 2>/dev/null || true
-                            """,
-                            returnStdout: true
-                        ).trim()
-
-                        if (!arn || arn == 'None') {
-
-                            echo "Creating target group: ${tgName}"
-
-                            arn = sh(
-                                script: """
-                                    aws elbv2 create-target-group \
-                                        --name ${tgName} \
-                                        --protocol HTTP \
-                                        --port ${port} \
-                                        --target-type ip \
-                                        --vpc-id ${VPC_ID} \
-                                        --health-check-protocol HTTP \
-                                        --health-check-path '${healthPath}' \
-                                        --health-check-port traffic-port \
-                                        --health-check-interval-seconds 30 \
-                                        --health-check-timeout-seconds 5 \
-                                        --healthy-threshold-count 2 \
-                                        --unhealthy-threshold-count 3 \
-                                        --region ${AWS_REGION} \
-                                        --query 'TargetGroups[0].TargetGroupArn' \
-                                        --output text
-                                """,
-                                returnStdout: true
-                            ).trim()
-
-                        } else {
-
-                            echo "Target group already exists: ${tgName}"
-
-                        }
-
-                        if (!arn || arn == 'None') {
-                            error "Failed to create/find target group: ${tgName}"
-                        }
-
-                        return arn
-
+                    if (!env.FRONTEND_SERVICE) {
+                        error "❌ FRONTEND_SERVICE is not available."
                     }
 
-                    env.FRONTEND_TARGET_GROUP_ARN =
-                        getOrCreateTargetGroup(
-                            env.FRONTEND_TARGET_GROUP,
-                            env.FRONTEND_CONTAINER_PORT,
-                            env.FRONTEND_HEALTH_PATH
-                        )
-
-                    env.BACKEND_TARGET_GROUP_ARN =
-                        getOrCreateTargetGroup(
-                            env.BACKEND_TARGET_GROUP,
-                            env.BACKEND_CONTAINER_PORT,
-                            env.BACKEND_HEALTH_PATH
-                        )
-
-                    // ----------------------------------
-                    // VALIDATE TARGET GROUPS
-                    // ----------------------------------
-
-                    def validateTargetGroup = {
-                        arn,
-                        name,
-                        expectedPort ->
-
-                        def details = sh(
-                            script: """
-                                aws elbv2 describe-target-groups \
-                                    --target-group-arns ${arn} \
-                                    --region ${AWS_REGION} \
-                                    --query 'TargetGroups[0].[VpcId,TargetType,Port]' \
-                                    --output text
-                            """,
-                            returnStdout: true
-                        ).trim().tokenize()
-
-                        if (
-                            details.size() < 3 ||
-                            details[0] != env.VPC_ID ||
-                            details[1] != 'ip' ||
-                            details[2].toInteger() != expectedPort.toInteger()
-                        ) {
-
-                            error "Target group configuration mismatch: ${name}"
-
-                        }
-
-                        echo "${name} target group validated."
-
+                    if (!env.BACKEND_SERVICE) {
+                        error "❌ BACKEND_SERVICE is not available."
                     }
 
-                    validateTargetGroup(
-                        env.FRONTEND_TARGET_GROUP_ARN,
-                        'Frontend',
-                        env.FRONTEND_CONTAINER_PORT
-                    )
+                    echo "Cluster          : ${ECS_CLUSTER}"
+                    echo "Frontend Service : ${FRONTEND_SERVICE}"
+                    echo "Backend Service  : ${BACKEND_SERVICE}"
 
-                    validateTargetGroup(
-                        env.BACKEND_TARGET_GROUP_ARN,
-                        'Backend',
-                        env.BACKEND_CONTAINER_PORT
-                    )
+                    // =========================================================
+                    // WAIT FOR FRONTEND SERVICE
+                    // =========================================================
 
-                    // ----------------------------------
-                    // ENSURE TARGET GROUP HEALTH PATHS
-                    // ----------------------------------
+                    echo ""
+                    echo "🌐 Waiting for frontend ECS service..."
 
                     sh """
-                        aws elbv2 modify-target-group \
-                            --target-group-arn ${FRONTEND_TARGET_GROUP_ARN} \
-                            --health-check-protocol HTTP \
-                            --health-check-path '${FRONTEND_HEALTH_PATH}' \
-                            --health-check-port traffic-port \
-                            --region ${AWS_REGION}
-
-                        aws elbv2 modify-target-group \
-                            --target-group-arn ${BACKEND_TARGET_GROUP_ARN} \
-                            --health-check-protocol HTTP \
-                            --health-check-path '${BACKEND_HEALTH_PATH}' \
-                            --health-check-port traffic-port \
+                        aws ecs wait services-stable \
+                            --cluster ${ECS_CLUSTER} \
+                            --services ${FRONTEND_SERVICE} \
                             --region ${AWS_REGION}
                     """
 
-                    // ==================================
-                    // CREATE / UPDATE LISTENERS
-                    // ==================================
+                    echo "✅ Frontend ECS service is stable."
 
-                    def getOrCreateListener = {
-                        albArn,
-                        tgArn,
-                        label ->
+                    // =========================================================
+                    // WAIT FOR BACKEND SERVICE
+                    // =========================================================
 
-                        def listenerArn = sh(
-                            script: """
-                                aws elbv2 describe-listeners \
-                                    --load-balancer-arn ${albArn} \
-                                    --region ${AWS_REGION} \
-                                    --query 'Listeners[?Port==\\`80\\`].ListenerArn | [0]' \
-                                    --output text 2>/dev/null || true
-                            """,
-                            returnStdout: true
-                        ).trim()
+                    echo ""
+                    echo "⚙️ Waiting for backend ECS service..."
 
-                        if (!listenerArn || listenerArn == 'None') {
+                    sh """
+                        aws ecs wait services-stable \
+                            --cluster ${ECS_CLUSTER} \
+                            --services ${BACKEND_SERVICE} \
+                            --region ${AWS_REGION}
+                    """
 
-                            echo "Creating ${label} HTTP listener..."
+                    echo "✅ Backend ECS service is stable."
 
-                            listenerArn = sh(
-                                script: """
-                                    aws elbv2 create-listener \
-                                        --load-balancer-arn ${albArn} \
-                                        --protocol HTTP \
-                                        --port 80 \
-                                        --default-actions Type=forward,TargetGroupArn=${tgArn} \
-                                        --region ${AWS_REGION} \
-                                        --query 'Listeners[0].ListenerArn' \
-                                        --output text
-                                """,
-                                returnStdout: true
-                            ).trim()
+                    // =========================================================
+                    // VERIFY FINAL SERVICE STATUS
+                    // =========================================================
 
-                        } else {
+                    echo ""
+                    echo "🔍 Verifying final ECS service status..."
 
-                            sh """
-                                aws elbv2 modify-listener \
-                                    --listener-arn ${listenerArn} \
-                                    --default-actions Type=forward,TargetGroupArn=${tgArn} \
-                                    --region ${AWS_REGION}
-                            """
-
-                            echo "${label} listener updated."
-
-                        }
-
-                        if (!listenerArn || listenerArn == 'None') {
-                            error "Failed to create/find ${label} listener."
-                        }
-
-                        return listenerArn
-
-                    }
-
-                    env.FRONTEND_LISTENER_ARN =
-                        getOrCreateListener(
-                            env.FRONTEND_LOAD_BALANCER_ARN,
-                            env.FRONTEND_TARGET_GROUP_ARN,
-                            'Frontend'
-                        )
-
-                    env.BACKEND_LISTENER_ARN =
-                        getOrCreateListener(
-                            env.BACKEND_LOAD_BALANCER_ARN,
-                            env.BACKEND_TARGET_GROUP_ARN,
-                            'Backend'
-                        )
-
-                    // ==================================
-                    // CREATE / UPDATE ECS SERVICES
-                    // ==================================
-
-                    def createOrUpdateService = {
-                        serviceName,
-                        taskDefinitionArn,
-                        containerName,
-                        containerPort,
-                        targetGroupArn ->
-
-                        def serviceArn = sh(
-                            script: """
-                                aws ecs describe-services \
-                                    --cluster ${ECS_CLUSTER} \
-                                    --services ${serviceName} \
-                                    --region ${AWS_REGION} \
-                                    --query 'services[0].serviceArn' \
-                                    --output text 2>/dev/null || true
-                            """,
-                            returnStdout: true
-                        ).trim()
-
-                        if (!serviceArn || serviceArn == 'None') {
-
-                            echo "Creating ECS service: ${serviceName}"
-
-                            sh """
-                                aws ecs create-service \
-                                    --cluster ${ECS_CLUSTER} \
-                                    --service-name ${serviceName} \
-                                    --task-definition ${taskDefinitionArn} \
-                                    --desired-count 1 \
-                                    --launch-type FARGATE \
-                                    --platform-version 1.4.0 \
-                                    --enable-execute-command \
-                                    --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_1},${SUBNET_2}],securityGroups=[${SECURITY_GROUP_1},${SECURITY_GROUP_2}],assignPublicIp=ENABLED}" \
-                                    --load-balancers "targetGroupArn=${targetGroupArn},containerName=${containerName},containerPort=${containerPort}" \
-                                    --region ${AWS_REGION}
-                            """
-
-                            echo "${serviceName} created."
-
-                        } else {
-
-                            echo "Updating ECS service: ${serviceName}"
-
-                            sh """
-                                aws ecs update-service \
-                                    --cluster ${ECS_CLUSTER} \
-                                    --service ${serviceName} \
-                                    --task-definition ${taskDefinitionArn} \
-                                    --desired-count 1 \
-                                    --load-balancers "targetGroupArn=${targetGroupArn},containerName=${containerName},containerPort=${containerPort}" \
-                                    --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_1},${SUBNET_2}],securityGroups=[${SECURITY_GROUP_1},${SECURITY_GROUP_2}],assignPublicIp=ENABLED}" \
-                                    --force-new-deployment \
-                                    --region ${AWS_REGION}
-                            """
-
-                            echo "${serviceName} updated."
-
-                        }
-
-                    }
-
-                    createOrUpdateService(
-                        env.FRONTEND_SERVICE,
-                        env.FRONTEND_TASK_DEFINITION_ARN,
-                        env.FRONTEND_CONTAINER_NAME,
-                        env.FRONTEND_CONTAINER_PORT.toInteger(),
-                        env.FRONTEND_TARGET_GROUP_ARN
-                    )
-
-                    createOrUpdateService(
-                        env.BACKEND_SERVICE,
-                        env.BACKEND_TASK_DEFINITION_ARN,
-                        env.BACKEND_CONTAINER_NAME,
-                        env.BACKEND_CONTAINER_PORT.toInteger(),
-                        env.BACKEND_TARGET_GROUP_ARN
-                    )
-
-                    echo '============================================'
-                    echo 'VMS ECS SERVICES CREATED / UPDATED'
-                    echo '============================================'
-
-                }
-
-            }
-
-        }
-
-        // ==========================================
-        // 11. WAIT FOR ECS STABILITY
-        // ==========================================
-
-        stage('Wait for ECS Stability') {
-
-            steps {
-
-                script {
-
-                    echo 'Waiting for frontend and backend ECS services...'
-
-                    timeout(time: 20, unit: 'MINUTES') {
-
-                        sh '''
-                            set -eu
-
-                            aws ecs wait services-stable \
-                                --cluster "$ECS_CLUSTER" \
-                                --services "$FRONTEND_SERVICE" "$BACKEND_SERVICE" \
-                                --region "$AWS_REGION"
-                        '''
-
-                    }
-
-                    echo 'Both ECS services are stable.'
-
-                    sh '''
+                    sh """
                         aws ecs describe-services \
-                            --cluster "$ECS_CLUSTER" \
-                            --services "$FRONTEND_SERVICE" "$BACKEND_SERVICE" \
-                            --region "$AWS_REGION" \
+                            --cluster ${ECS_CLUSTER} \
+                            --services ${FRONTEND_SERVICE} ${BACKEND_SERVICE} \
+                            --region ${AWS_REGION} \
                             --query 'services[].{
                                 Service:serviceName,
                                 Status:status,
@@ -1377,31 +986,27 @@ EOF
                                 Pending:pendingCount
                             }' \
                             --output table
-                    '''
+                    """
 
+                    echo ""
+                    echo "=========================================="
+                    echo "✅ ECS SERVICES ARE STABLE"
+                    echo "=========================================="
                 }
-
             }
-
         }
 
-        // ==========================================
-        // 12. FINAL HEALTH CHECK
-        // ==========================================
 
         stage('Health Check') {
-
             steps {
-
                 script {
+                    echo "=========================================="
+                    echo "🏥 ECS APPLICATION HEALTH CHECK"
+                    echo "=========================================="
 
-                    echo '============================================'
-                    echo 'VMS APPLICATION HEALTH CHECK'
-                    echo '============================================'
-
-                    // ----------------------------------
-                    // VALIDATE REQUIRED VARIABLES
-                    // ----------------------------------
+                    // =====================================================
+                    // 1. VALIDATE REQUIRED ENVIRONMENT VARIABLES
+                    // =====================================================
 
                     def requiredVariables = [
                         'AWS_REGION',
@@ -1412,51 +1017,89 @@ EOF
                         'BACKEND_TARGET_GROUP_ARN'
                     ]
 
-                    requiredVariables.each { variable ->
-
-                        if (!env[variable]?.trim()) {
-                            error "Missing required variable: ${variable}"
-                        }
-
+                    if (!env.AWS_REGION?.trim()) {
+                        error "AWS_REGION is missing"
                     }
 
-                    // ----------------------------------
-                    // CHECK ECS SERVICE
-                    // ----------------------------------
+                    if (!env.ECS_CLUSTER?.trim()) {
+                        error "ECS_CLUSTER is missing"
+                    }
 
-                    def checkEcsService = {
-                        serviceName,
-                        label ->
+                    if (!env.FRONTEND_SERVICE?.trim()) {
+                        error "FRONTEND_SERVICE is missing"
+                    }
 
-                        def serviceInfo = ''
+                    if (!env.BACKEND_SERVICE?.trim()) {
+                        error "BACKEND_SERVICE is missing"
+                    }
 
-                        withEnv(["SERVICE_NAME=${serviceName}"]) {
+                    if (!env.FRONTEND_TARGET_GROUP_ARN?.trim()) {
+                        error "FRONTEND_TARGET_GROUP_ARN is missing"
+                    }
 
-                            serviceInfo = sh(
-                                script: '''
-                                    set -eu
+                    if (!env.BACKEND_TARGET_GROUP_ARN?.trim()) {
+                        error "BACKEND_TARGET_GROUP_ARN is missing"
+                    }
 
-                                    aws ecs describe-services \
-                                        --cluster "$ECS_CLUSTER" \
-                                        --services "$SERVICE_NAME" \
-                                        --region "$AWS_REGION" \
-                                        --query 'services[0].[status,desiredCount,runningCount,pendingCount]' \
-                                        --output text
-                                ''',
-                                returnStdout: true
-                            ).trim()
+                    echo "✅ All required environment variables are available."
 
-                        }
+                    echo "✅ Required variables are available."
+                    echo "AWS region: ${env.AWS_REGION}"
+                    echo "ECS cluster: ${env.ECS_CLUSTER}"
+
+                    // =====================================================
+                    // 2. WAIT FOR ECS SERVICES TO BECOME STABLE
+                    // =====================================================
+
+                    echo "⏳ Waiting for frontend and backend ECS services..."
+
+                    timeout(time: 15, unit: 'MINUTES') {
+                        sh(
+                            label: 'Wait for ECS services to stabilize',
+                            script: '''
+                                set -eu
+
+                                aws ecs wait services-stable \
+                                    --cluster "$ECS_CLUSTER" \
+                                    --services "$FRONTEND_SERVICE" "$BACKEND_SERVICE" \
+                                    --region "$AWS_REGION"
+
+                                echo "✅ ECS services have stabilized."
+                            '''
+                        )
+                    }
+
+                    // =====================================================
+                    // 3. CHECK ECS SERVICE STATUS AND TASK COUNTS
+                    // =====================================================
+
+                    def checkEcsService = { serviceName, serviceLabel ->
+
+                        echo "🔍 Checking ${serviceLabel} ECS service..."
+
+                        def serviceInfo = sh(
+                            label: "Check ${serviceLabel} ECS status",
+                            script: '''
+                                set -eu
+
+                                aws ecs describe-services \
+                                    --cluster "$ECS_CLUSTER" \
+                                    --services "$SERVICE_NAME" \
+                                    --region "$AWS_REGION" \
+                                    --query 'services[0].[status,desiredCount,runningCount,pendingCount]' \
+                                    --output text
+                            ''',
+                            returnStdout: true
+                        ).trim()
+
+                        // Supply the service name as a shell environment variable.
+                        // This avoids Groovy interpolation in the shell command.
+                        echo "${serviceLabel} ECS details: ${serviceInfo}"
 
                         def values = serviceInfo.tokenize()
 
-                        if (
-                            values.size() < 4 ||
-                            values[0] == 'None'
-                        ) {
-
-                            error "Unable to retrieve ${label} ECS service details."
-
+                        if (values.size() < 4 || values[0] == 'None') {
+                            error "❌ Could not retrieve ${serviceLabel} ECS service details."
                         }
 
                         def status = values[0]
@@ -1465,194 +1108,145 @@ EOF
                         def pending = values[3].toInteger()
 
                         if (status != 'ACTIVE') {
-                            error "${label} ECS service is not ACTIVE."
+                            error "❌ ${serviceLabel} ECS service status is ${status}, not ACTIVE."
                         }
 
                         if (desired < 1) {
-                            error "${label} ECS service has no desired tasks."
+                            error "❌ ${serviceLabel} ECS service has no desired tasks."
                         }
 
                         if (running < desired) {
-                            error "${label}: Running ${running}, Desired ${desired}."
+                            error "❌ ${serviceLabel}: running ${running} tasks, but ${desired} are desired."
                         }
 
-                        echo "${label}: ACTIVE | Desired=${desired} | Running=${running} | Pending=${pending}"
+                        echo "✅ ${serviceLabel}: ACTIVE | Desired=${desired} | Running=${running} | Pending=${pending}"
 
                         return desired
-
                     }
 
-                    def frontendDesired = checkEcsService(
-                        env.FRONTEND_SERVICE,
-                        'Frontend'
-                    )
+                    // Set the service name using withEnv, not Groovy interpolation
+                    // inside the shell command.
+                    def frontendDesired
+                    def backendDesired
 
-                    def backendDesired = checkEcsService(
-                        env.BACKEND_SERVICE,
-                        'Backend'
-                    )
+                    withEnv(["SERVICE_NAME=${env.FRONTEND_SERVICE}"]) {
+                        frontendDesired = checkEcsService(
+                            env.FRONTEND_SERVICE,
+                            'Frontend'
+                        )
+                    }
 
-                    // ----------------------------------
-                    // CHECK ALB TARGET HEALTH
-                    // ----------------------------------
+                    withEnv(["SERVICE_NAME=${env.BACKEND_SERVICE}"]) {
+                        backendDesired = checkEcsService(
+                            env.BACKEND_SERVICE,
+                            'Backend'
+                        )
+                    }
 
-                    def checkTargetGroup = {
-                        targetGroupArn,
-                        label,
-                        desiredCount ->
+                    // =====================================================
+                    // 4. CHECK ALB TARGET HEALTH
+                    //
+                    // Pass when healthy targets meet the ECS desired count.
+                    // "draining" targets are allowed during replacement.
+                    // =====================================================
+
+                    def checkTargetGroup = { targetGroupArn, serviceLabel, desiredCount ->
+
+                        echo "🌐 Checking ${serviceLabel} ALB target health..."
 
                         def healthyCount = 0
                         def states = []
 
+                        // Allow up to 5 minutes for ALB health checks to catch up.
                         for (int attempt = 1; attempt <= 20; attempt++) {
 
-                            def targetOutput = ''
+                            def targetOutput = sh(
+                                label: "Read ${serviceLabel} ALB target states",
+                                script: '''
+                                    set -eu
 
-                            withEnv([
-                                "TARGET_GROUP_ARN=${targetGroupArn}"
-                            ]) {
-
-                                targetOutput = sh(
-                                    script: '''
-                                        set -eu
-
-                                        aws elbv2 describe-target-health \
-                                            --target-group-arn "$TARGET_GROUP_ARN" \
-                                            --region "$AWS_REGION" \
-                                            --query 'TargetHealthDescriptions[].TargetHealth.State' \
-                                            --output text
-                                    ''',
-                                    returnStdout: true
-                                ).trim()
-
-                            }
+                                    aws elbv2 describe-target-health \
+                                        --target-group-arn "$TARGET_GROUP_ARN" \
+                                        --region "$AWS_REGION" \
+                                        --query 'TargetHealthDescriptions[].TargetHealth.State' \
+                                        --output text
+                                ''',
+                                returnStdout: true
+                            ).trim()
 
                             states = targetOutput
                                 .tokenize()
                                 .collect { it.toLowerCase() }
 
-                            healthyCount = states.count {
-                                it == 'healthy'
-                            }
+                            healthyCount = states.count { it == 'healthy' }
 
-                            echo "${label} target states: ${states ? states.join(', ') : 'NO TARGETS'}"
+                            echo "${serviceLabel} target states: ${states ? states.join(', ') : 'NO TARGETS'}"
+                            echo "${serviceLabel}: ${healthyCount} healthy target(s); ${desiredCount} required."
 
-                            echo "${label}: ${healthyCount} healthy / ${desiredCount} required."
-
+                            // Healthy capacity is available. Draining old targets
+                            // do not cause a failure by themselves.
                             if (healthyCount >= desiredCount) {
 
-                                def drainingCount = states.count {
-                                    it == 'draining'
-                                }
+                                def drainingCount = states.count { it == 'draining' }
+                                def unhealthyCount = states.count { it == 'unhealthy' }
 
-                                echo "${label} ALB health check passed."
+                                echo "✅ ${serviceLabel}: required healthy target capacity is available."
 
                                 if (drainingCount > 0) {
-                                    echo "${label}: ${drainingCount} old target(s) are draining."
+                                    echo "ℹ️ ${serviceLabel}: ${drainingCount} old target(s) are draining."
+                                }
+
+                                if (unhealthyCount > 0) {
+                                    echo "⚠️ ${serviceLabel}: ${unhealthyCount} target(s) are unhealthy, but healthy capacity meets the desired count."
                                 }
 
                                 return
-
                             }
 
                             if (attempt < 20) {
-
-                                echo "Waiting for ${label} targets. Attempt ${attempt}/20."
-
+                                echo "⏳ Waiting 15 seconds for ${serviceLabel} targets to become healthy (attempt ${attempt}/20)..."
                                 sleep(time: 15, unit: 'SECONDS')
-
                             }
-
                         }
 
-                        error "${label} ALB health check failed. Healthy=${healthyCount}, Required=${desiredCount}, States=${states}"
-
+                        error "❌ ${serviceLabel} ALB check failed: only ${healthyCount} healthy target(s); ${desiredCount} required. Final states: ${states ? states.join(', ') : 'NO TARGETS'}"
                     }
 
-                    // ----------------------------------
-                    // VERIFY FRONTEND
-                    // ----------------------------------
+                    // Pass target group ARNs into the shell through environment variables.
+                    withEnv(["TARGET_GROUP_ARN=${env.FRONTEND_TARGET_GROUP_ARN}"]) {
+                        checkTargetGroup(
+                            env.FRONTEND_TARGET_GROUP_ARN,
+                            'Frontend',
+                            frontendDesired
+                        )
+                    }
 
-                    checkTargetGroup(
-                        env.FRONTEND_TARGET_GROUP_ARN,
-                        'Frontend',
-                        frontendDesired
-                    )
+                    withEnv(["TARGET_GROUP_ARN=${env.BACKEND_TARGET_GROUP_ARN}"]) {
+                        checkTargetGroup(
+                            env.BACKEND_TARGET_GROUP_ARN,
+                            'Backend',
+                            backendDesired
+                        )
+                    }
 
-                    // ----------------------------------
-                    // VERIFY BACKEND
-                    // ----------------------------------
+                    // =====================================================
+                    // 5. FINAL SUMMARY
+                    // =====================================================
 
-                    checkTargetGroup(
-                        env.BACKEND_TARGET_GROUP_ARN,
-                        'Backend',
-                        backendDesired
-                    )
-
-                    // ----------------------------------
-                    // FINAL DEPLOYMENT SUMMARY
-                    // ----------------------------------
-
-                    echo ''
-                    echo '============================================'
-                    echo 'VMS DEPLOYMENT HEALTH CHECK PASSED'
-                    echo '============================================'
-
-                    echo "Project     : ${PROJECT_NAME}"
-                    echo "Environment : ${env.ENVIRONMENT}"
-                    echo "Git Tag     : ${env.TAG_NAME}"
-
-                    echo 'Frontend ECS : HEALTHY'
-                    echo 'Frontend ALB : HEALTHY'
-
-                    echo 'Backend ECS  : HEALTHY'
-                    echo 'Backend ALB  : HEALTHY'
-
-                    echo '============================================'
-                    echo 'VMS DEPLOYMENT SUCCESSFUL'
-                    echo '============================================'
-
+                    echo ""
+                    echo "=========================================="
+                    echo "✅ HEALTH CHECK PASSED"
+                    echo "=========================================="
+                    echo "Frontend ECS : HEALTHY"
+                    echo "Frontend ALB : HEALTHY"
+                    echo "Backend ECS  : HEALTHY"
+                    echo "Backend ALB  : HEALTHY"
+                    echo "🚀 Application deployment is healthy."
+                    echo "=========================================="
                 }
-
             }
-
         }
+
 
     }
-
-    post {
-
-        success {
-
-            echo '''
-            ============================================
-            VMS DEPLOYMENT COMPLETED SUCCESSFULLY
-            ============================================
-            '''
-
-        }
-
-        failure {
-
-            echo '''
-            ============================================
-            VMS DEPLOYMENT FAILED
-            ============================================
-            Please check Jenkins Console Output,
-            AWS CodeBuild logs, ECS events and
-            CloudWatch application logs.
-            ============================================
-            '''
-
-        }
-
-        always {
-
-            echo 'VMS Jenkins pipeline execution finished.'
-
-        }
-
-    }
-
 }
-

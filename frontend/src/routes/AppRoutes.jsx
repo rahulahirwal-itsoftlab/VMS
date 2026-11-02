@@ -123,7 +123,7 @@ const AppRoutes = () => {
                 database: "connected",
                 timestamp: new Date().toISOString(),
                 uptimeSeconds: Math.floor(performance.now() / 1000),
-                service: "vms-backend",
+                service: "vms-frontend",
                 environment: "development",
               },
               null,

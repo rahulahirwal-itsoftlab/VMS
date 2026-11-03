@@ -48,7 +48,7 @@ pipeline {
 
         GIT_REPO = "https://${GITHUB_PAT}@github.com/IT-SOFTLAB/ITSOFTLAB360.git"
 
-        BACKEND_PRODUCTION_ENV_S3_KEY = 'secure-itsoftla360-backend-env'
+        BACKEND_PRODUCTION_ENV_S3_KEY = 'vms-360-backend-production-env'
         FRONTEND_PRODUCTION_ENV_S3_KEY = 'vms-360-frontend-production-env'
         BACKEND_STAGING_ENV_S3_KEY = 'vms-360-backend-production-env'
         FRONTEND_STAGING_ENV_S3_KEY = 'vms-360-frontend-production-env'

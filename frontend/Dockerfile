@@ -38,7 +38,7 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 80
 
-# HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-#     CMD curl --fail --silent http://127.0.0.1:80/api/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl --fail --silent http://127.0.0.1:80/api/health || exit 1
 
 CMD ["serve", "-s", "dist", "-l", "80"]

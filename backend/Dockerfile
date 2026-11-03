@@ -1,40 +1,30 @@
-# Stage 1: Dependencies
-FROM node:22-slim AS deps
+FROM public.ecr.aws/docker/library/node:22-alpine
+
+RUN apk add --no-cache openssl curl
 
 WORKDIR /app
 
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+COPY package*.json ./
 
-COPY package.json package-lock.json ./
-COPY prisma ./prisma
+RUN npm ci --omit=dev
 
-RUN npm ci
+COPY prisma ./prisma/
 
+RUN npx prisma generate
 
-# Stage 2: Runner
-FROM node:22-slim AS runner
-
-WORKDIR /app
-
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+COPY . .
 
 ENV NODE_ENV=production
-
-RUN groupadd --system --gid 1001 nodejs && \
-    useradd --system --uid 1001 --gid nodejs expressjs
-
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/prisma ./prisma
-
-COPY --chown=expressjs:nodejs . .
-
-# YEH NAYI LINE YAHAN ADD KAREIN:
-RUN mkdir -p /app/uploads/vendor-documents && chown -R expressjs:nodejs /app/uploads
-
-USER expressjs
+ENV PORT=5000
 
 EXPOSE 5000
 
-CMD ["node", "src/server.js"]
+HEALTHCHECK \
+    --interval=30s \
+    --timeout=5s \
+    --start-period=30s \
+    --retries=3 \
+    CMD curl --fail --silent http://127.0.0.1:5000/api/health > /dev/null || exit 1
 
 
+CMD ["npm", "start"]

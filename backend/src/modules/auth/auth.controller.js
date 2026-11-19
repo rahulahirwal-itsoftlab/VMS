@@ -2,12 +2,14 @@ import authService from "./auth.service.js";
 import { AUTH_MESSAGES } from "./auth.constants.js";
 import asyncHandler from "../../middleware/asyncHandler.middleware.js";
 
-const getCookieOptions = (maxAgeMs = 30 * 24 * 60 * 60 * 1000) => {
+const getCookieOptions = (req = null, maxAgeMs = 30 * 24 * 60 * 60 * 1000) => {
   const isProduction = process.env.NODE_ENV === 'production';
+  const isHttps = req?.secure || req?.headers?.['x-forwarded-proto'] === 'https';
+  const secure = isProduction || Boolean(isHttps);
   return {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? 'none' : 'lax',
+    secure,
+    sameSite: secure ? 'none' : 'lax',
     path: '/',
     maxAge: maxAgeMs,
   };
@@ -42,10 +44,10 @@ class AuthController {
       });
     }
 
-    res.cookie('vms_access_token', result.accessToken, getCookieOptions(60 * 60 * 1000));
+    res.cookie('vms_access_token', result.accessToken, getCookieOptions(req, 24 * 60 * 60 * 1000));
 
     if (result.refreshToken) {
-      res.cookie('vms_refresh_token', result.refreshToken, getCookieOptions(30 * 24 * 60 * 60 * 1000));
+      res.cookie('vms_refresh_token', result.refreshToken, getCookieOptions(req, 30 * 24 * 60 * 60 * 1000));
     }
 
     const safeData = {
@@ -71,7 +73,7 @@ class AuthController {
     console.log("[AUTH] Explicit logout requested");
     const refreshToken = req.cookies?.vms_refresh_token || req.body?.refreshToken;
     const message = await authService.logout(req.user.id, refreshToken);
-    const clearOpts = getCookieOptions(0);
+    const clearOpts = getCookieOptions(req, 0);
     res.clearCookie('vms_access_token', clearOpts);
     res.clearCookie('vms_refresh_token', clearOpts);
     console.log("[AUTH] Logout completed");
@@ -85,19 +87,35 @@ class AuthController {
    */
   refreshToken = asyncHandler(async (req, res) => {
     console.log("[AUTH] Refresh request received");
-    const oldRefreshToken = req.cookies?.vms_refresh_token || req.body?.refreshToken;
+    const bodyToken = req.body?.refreshToken;
+    const cookieToken = req.cookies?.vms_refresh_token;
     const meta = {
       userAgent: req.headers['user-agent'],
       ipAddress: req.ip,
     };
 
-    const { accessToken, refreshToken, user } =
-      await authService.refreshToken(oldRefreshToken, meta);
 
-    res.cookie('vms_access_token', accessToken, getCookieOptions(60 * 60 * 1000));
+    let result;
+    const primaryToken = bodyToken || cookieToken;
+    const fallbackToken = bodyToken && cookieToken && bodyToken !== cookieToken ? cookieToken : null;
+
+    try {
+      result = await authService.refreshToken(primaryToken, meta);
+    } catch (err) {
+      if (fallbackToken) {
+        console.log("[AUTH] Primary refresh token attempt failed; trying fallback cookie token");
+        result = await authService.refreshToken(fallbackToken, meta);
+      } else {
+        throw err;
+      }
+    }
+
+    const { accessToken, refreshToken, user } = result;
+
+    res.cookie('vms_access_token', accessToken, getCookieOptions(req, 24 * 60 * 60 * 1000));
 
     if (refreshToken) {
-      res.cookie('vms_refresh_token', refreshToken, getCookieOptions(30 * 24 * 60 * 60 * 1000));
+      res.cookie('vms_refresh_token', refreshToken, getCookieOptions(req, 30 * 24 * 60 * 60 * 1000));
     }
 
     res.status(200).json({
@@ -194,10 +212,10 @@ class AuthController {
   completeTemporaryPasswordChange = asyncHandler(async (req, res) => {
     const { passwordChangeToken, newPassword } = req.body;
     const result = await authService.completeTemporaryPasswordChange(passwordChangeToken, newPassword);
-    res.cookie('vms_access_token', result.accessToken, getCookieOptions(60 * 60 * 1000));
+    res.cookie('vms_access_token', result.accessToken, getCookieOptions(req, 24 * 60 * 60 * 1000));
 
     if (result.refreshToken) {
-      res.cookie('vms_refresh_token', result.refreshToken, getCookieOptions(30 * 24 * 60 * 60 * 1000));
+      res.cookie('vms_refresh_token', result.refreshToken, getCookieOptions(req, 30 * 24 * 60 * 60 * 1000));
     }
 
     res.status(200).json({

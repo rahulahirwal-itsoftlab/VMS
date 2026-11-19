@@ -26,13 +26,18 @@ const buildDateRange = (field, startDate, endDate) => {
  */
 const writeExportAuditLog = async ({ userId, action, entityType, filters, recordCount, format, req }) => {
   try {
+    const formatUpper = String(format || 'xlsx').toUpperCase();
+    const count = recordCount != null ? `${recordCount} record${recordCount === 1 ? '' : 's'}` : 'records';
+    const cleanRemarks = `Exported ${count} as ${formatUpper}`;
+
     await prisma.auditLog.create({
       data: {
         entity_type:     entityType,
         entity_id:       'report-export',
         action,
         performed_by_id: userId || null,
-        remarks:         JSON.stringify({ filters, recordCount, format }),
+        remarks:         cleanRemarks,
+        new_value:       { filters, recordCount, format },
         ip_address:      req?.ip || null,
         user_agent:      req?.headers?.['user-agent'] || null,
       },

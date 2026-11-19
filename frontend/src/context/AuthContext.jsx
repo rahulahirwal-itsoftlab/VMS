@@ -11,6 +11,7 @@ import {
   broadcastAuthEvent,
   clearAuthSession,
   getAccessToken,
+  getRefreshToken,
   getStoredUser,
   isTokenExpiringSoon,
   subscribeToAuthEvents,
@@ -36,10 +37,17 @@ export const AuthProvider = ({ children }) => {
         setStatus(AUTH_STATUS.INITIALIZING);
         const cachedUser = getStoredUser();
         const hasAccessToken = Boolean(getAccessToken());
+        const hasRefreshToken = Boolean(getRefreshToken());
         console.log("[AUTH] Existing authentication state detected", {
           hasCachedUser: Boolean(cachedUser),
           hasAccessToken,
+          hasRefreshToken,
         });
+        if (!hasAccessToken && !hasRefreshToken && !cachedUser) {
+          setStatus(AUTH_STATUS.UNAUTHENTICATED);
+          return;
+        }
+
         console.log("[AUTH] Session restoration started");
         const currentUser = await getCurrentUser();
         if (currentUser) {
@@ -52,7 +60,8 @@ export const AuthProvider = ({ children }) => {
         }
       } catch {
         const cachedUser = getStoredUser();
-        if (cachedUser && getAccessToken()) {
+        const hasTokens = Boolean(getAccessToken() || getRefreshToken());
+        if (cachedUser && hasTokens) {
           console.log("[AUTH] Session restoration deferred; keeping cached authenticated state");
           setUser(cachedUser);
           setStatus(AUTH_STATUS.AUTHENTICATED);

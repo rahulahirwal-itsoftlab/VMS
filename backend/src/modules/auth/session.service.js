@@ -4,7 +4,23 @@ import { generateAuthTokens, hashToken, verifyRefreshToken } from "../../utils/j
 import { AUTH_MESSAGES } from "./auth.constants.js";
 import { USER_ACCOUNT_STATUS } from "../users/user-status.constants.js";
 
-const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const parseExpiryToMs = (expiryStr, fallbackMs) => {
+  if (!expiryStr) return fallbackMs;
+  const match = String(expiryStr).trim().match(/^(\d+)([smhd])$/);
+  if (!match) return fallbackMs;
+  const val = parseInt(match[1], 10);
+  const unit = match[2];
+  if (unit === 's') return val * 1000;
+  if (unit === 'm') return val * 60 * 1000;
+  if (unit === 'h') return val * 60 * 60 * 1000;
+  if (unit === 'd') return val * 24 * 60 * 60 * 1000;
+  return fallbackMs;
+};
+
+export const REFRESH_TOKEN_TTL_MS = parseExpiryToMs(
+  process.env.REFRESH_TOKEN_EXPIRY || process.env.REFRESH_TOKEN_EXPIRES_IN,
+  30 * 24 * 60 * 60 * 1000
+);
 
 class SessionService {
   /**
@@ -50,13 +66,25 @@ class SessionService {
       include: { user: true },
     });
 
+    // Check if this token was replaced recently (e.g. concurrent tabs, page refresh during in-flight silent refresh)
+    if (!session) {
+      session = await prisma.userSession.findFirst({
+        where: {
+          replaced_by: oldHash,
+          revoked_at: null,
+        },
+        include: { user: true },
+        orderBy: { updated_at: 'desc' },
+      });
+    }
+
     // Multi-tab grace period: if another tab refreshed the token within the last 45 seconds
     if (!session) {
       const recentSession = await prisma.userSession.findFirst({
         where: {
           user_id: decoded.id,
           revoked_at: null,
-          updated_at: { gte: new Date(now.getTime() - 45 * 1000) },
+          expires_at: { gt: now },
         },
         include: { user: true },
         orderBy: { updated_at: 'desc' },
@@ -74,6 +102,22 @@ class SessionService {
           recentSession.user.id,
           recentSession.user.role,
         );
+        const newHash = hashToken(newRefreshToken);
+        await prisma.userSession.update({
+          where: { id: recentSession.id },
+          data: {
+            token_hash: newHash,
+            replaced_by: oldHash,
+            expires_at: new Date(now.getTime() + REFRESH_TOKEN_TTL_MS),
+            user_agent: userAgent || recentSession.user_agent,
+            ip_address: ipAddress || recentSession.ip_address,
+            updated_at: now,
+          },
+        }).catch(() => {});
+        await prisma.user.update({
+          where: { id: recentSession.user.id },
+          data: { refresh_token: newRefreshToken },
+        }).catch(() => {});
         return { accessToken, refreshToken: newRefreshToken, user: recentSession.user };
       }
 
@@ -105,6 +149,7 @@ class SessionService {
       where: { id: session.id },
       data: {
         token_hash: newHash,
+        replaced_by: oldHash,
         expires_at: newExpiresAt,
         user_agent: userAgent || session.user_agent,
         ip_address: ipAddress || session.ip_address,

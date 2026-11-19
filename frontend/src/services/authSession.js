@@ -3,6 +3,7 @@ export const REFRESH_TOKEN_KEY = "vms_refresh_token";
 export const USER_KEY = "vms_user";
 export const PASSWORD_CHANGE_TOKEN_KEY = "vms_password_change_token";
 export const AUTH_SESSION_CLEARED_EVENT = "vms:auth-session-cleared";
+export const REMEMBER_ME_KEY = "vms_remember_me";
 
 export const AUTH_EVENTS = {
   LOGIN: "AUTH_LOGIN",
@@ -72,8 +73,36 @@ export const subscribeToAuthEvents = (callback) => {
   };
 };
 
-const getStorageWithAccessToken = () =>
-  localStorage.getItem(ACCESS_TOKEN_KEY) ? localStorage : sessionStorage;
+export const getRememberMe = () => {
+  try {
+    return localStorage.getItem(REMEMBER_ME_KEY) === "true";
+  } catch {
+    return false;
+  }
+};
+
+export const getActiveStorage = () => {
+  try {
+    if (
+      localStorage.getItem(ACCESS_TOKEN_KEY) ||
+      localStorage.getItem(REFRESH_TOKEN_KEY) ||
+      getRememberMe()
+    ) {
+      return localStorage;
+    }
+    if (
+      sessionStorage.getItem(ACCESS_TOKEN_KEY) ||
+      sessionStorage.getItem(REFRESH_TOKEN_KEY)
+    ) {
+      return sessionStorage;
+    }
+    return localStorage;
+  } catch {
+    return sessionStorage;
+  }
+};
+
+const getStorageWithAccessToken = () => getActiveStorage();
 
 const normalizeToken = (token) => (typeof token === "string" && token.trim() ? token.trim() : null);
 
@@ -129,25 +158,43 @@ export const getStoredUser = () => {
 };
 
 export const setStoredUser = (user) => {
-  const storage = getStorageWithAccessToken();
-  storage.setItem(USER_KEY, JSON.stringify(user));
+  const storage = getActiveStorage();
+  try {
+    storage.setItem(USER_KEY, JSON.stringify(user));
+  } catch {
+    // ignore
+  }
 };
 
 export const setTokenStorage = (rememberMe, accessToken, refreshToken = null) => {
-  const storage = rememberMe ? localStorage : sessionStorage;
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
-  sessionStorage.removeItem(ACCESS_TOKEN_KEY);
-  sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+  const isRemember = Boolean(rememberMe);
+  const storage = isRemember ? localStorage : sessionStorage;
 
-  if (accessToken) storage.setItem(ACCESS_TOKEN_KEY, accessToken);
-  if (refreshToken) storage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  try {
+    localStorage.setItem(REMEMBER_ME_KEY, isRemember ? "true" : "false");
+    localStorage.removeItem(ACCESS_TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+    sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+
+    if (accessToken) storage.setItem(ACCESS_TOKEN_KEY, accessToken);
+    if (refreshToken) storage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  } catch {
+    // ignore
+  }
 };
 
 export const updateStoredTokens = (accessToken, refreshToken = null) => {
-  const storage = getStorageWithAccessToken();
-  if (accessToken) storage.setItem(ACCESS_TOKEN_KEY, accessToken);
-  if (refreshToken) storage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  const storage = getActiveStorage();
+  try {
+    if (accessToken) storage.setItem(ACCESS_TOKEN_KEY, accessToken);
+    if (refreshToken) storage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    const altStorage = storage === localStorage ? sessionStorage : localStorage;
+    altStorage.removeItem(ACCESS_TOKEN_KEY);
+    altStorage.removeItem(REFRESH_TOKEN_KEY);
+  } catch {
+    // ignore
+  }
 };
 
 export const clearAuthSession = ({ notify = true } = {}) => {
@@ -155,12 +202,13 @@ export const clearAuthSession = ({ notify = true } = {}) => {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(REMEMBER_ME_KEY);
+    localStorage.removeItem("vms_profile");
     sessionStorage.removeItem(ACCESS_TOKEN_KEY);
     sessionStorage.removeItem(REFRESH_TOKEN_KEY);
     sessionStorage.removeItem(USER_KEY);
     sessionStorage.removeItem(PASSWORD_CHANGE_TOKEN_KEY);
     sessionStorage.removeItem("vms_profile");
-    localStorage.removeItem("vms_profile");
     if (notify) {
       window.dispatchEvent(new Event(AUTH_SESSION_CLEARED_EVENT));
       broadcastAuthEvent(AUTH_EVENTS.LOGOUT);
@@ -170,5 +218,4 @@ export const clearAuthSession = ({ notify = true } = {}) => {
   }
 };
 
-export const hasAuthTokens = () => Boolean(getAccessToken());
-
+export const hasAuthTokens = () => Boolean(getAccessToken()) || Boolean(getRefreshToken());

@@ -4,10 +4,10 @@ import { UserEntity } from '../zodSchema/index.js';
 import { getPermissionsForRole } from '../modules/auth/role-permissions.js';
 
 // These would typically be loaded from process.env in a production environment
-const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || 'vms_access_secret_key_2024';
-const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'vms_refresh_secret_key_2024';
-const ACCESS_TOKEN_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || '7d';
-const REFRESH_TOKEN_EXPIRY = process.env.REFRESH_TOKEN_EXPIRY || '30d';
+export const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || process.env.JWT_SECRET || 'vms_access_secret_key_2024';
+export const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'vms_refresh_secret_key_2024';
+export const ACCESS_TOKEN_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || process.env.JWT_EXPIRES_IN || '15m';
+export const REFRESH_TOKEN_EXPIRY = process.env.REFRESH_TOKEN_EXPIRY || process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
 const PASSWORD_CHANGE_TOKEN_EXPIRY = process.env.PASSWORD_CHANGE_TOKEN_EXPIRY || '15m';
 const PASSWORD_CHANGE_PURPOSE = 'PASSWORD_CHANGE_REQUIRED';
 

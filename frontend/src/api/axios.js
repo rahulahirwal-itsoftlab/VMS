@@ -84,7 +84,7 @@ export const refreshAccessToken = async () => {
     const storedRefreshToken = getRefreshToken();
     const response = await axios.post(
       `${API_BASE_URL}/v1/auth/refresh-token`,
-      { refreshToken: storedRefreshToken },
+      storedRefreshToken ? { refreshToken: storedRefreshToken } : {},
       {
         headers: { "Content-Type": "application/json" },
         withCredentials: true,
@@ -94,7 +94,7 @@ export const refreshAccessToken = async () => {
     if (!accessToken) {
       throw new Error("Refresh did not return an access token");
     }
-    updateStoredTokens(accessToken, newRefreshToken);
+    updateStoredTokens(accessToken, newRefreshToken || storedRefreshToken);
     broadcastAuthEvent(AUTH_EVENTS.SESSION_UPDATED);
     console.log("[AUTH] Access token refresh successful");
     return accessToken;
@@ -112,6 +112,15 @@ api.interceptors.request.use((config) => {
   }
 
   const token = getAccessToken();
+  if (!token) {
+    if (config.__skipAuthRedirect || config.__skipAuthClear || getRefreshToken()) {
+      return config;
+    }
+    clearAuthSession();
+    redirectToLogin();
+    return Promise.reject(new AuthRequiredError());
+  }
+
   if (token) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;

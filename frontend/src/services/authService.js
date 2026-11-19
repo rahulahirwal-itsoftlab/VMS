@@ -3,6 +3,8 @@ import {
   PASSWORD_CHANGE_TOKEN_KEY,
   clearAuthSession,
   getAccessToken,
+  getRefreshToken,
+  isTokenExpiringSoon,
   hasAuthTokens,
   setStoredUser,
   setTokenStorage,
@@ -178,7 +180,26 @@ export const getCurrentUser = async () => {
   };
 
   try {
-    if (getAccessToken()) {
+    const accessToken = getAccessToken();
+    const refreshToken = getRefreshToken();
+
+    if (accessToken && isTokenExpiringSoon(accessToken, 60)) {
+      if (refreshToken) {
+        console.log("[AUTH] Access token expiring soon; proactively refreshing before profile fetch");
+        try {
+          await refreshAccessToken();
+        } catch (refreshErr) {
+          console.warn("[AUTH] Proactive refresh during profile fetch deferred:", refreshErr?.message || refreshErr);
+        }
+      }
+    } else if (!accessToken && refreshToken) {
+      console.log("[AUTH] No access token found but refresh token exists; attempting restoration via refresh");
+      try {
+        await refreshAccessToken();
+      } catch (refreshErr) {
+        console.warn("[AUTH] Initial refresh restoration deferred:", refreshErr?.message || refreshErr);
+      }
+    } else if (accessToken) {
       console.log("[AUTH] Existing access token found");
     } else {
       console.log("[AUTH] No stored access token; attempting cookie-backed session restoration");
@@ -218,8 +239,18 @@ export const getCurrentUser = async () => {
         if (refreshStatus === 503 || refreshCode === "DATABASE_UNAVAILABLE" || !refreshErr?.response) {
           console.log("[AUTH] Authentication restoration deferred because refresh is unavailable");
           throw refreshErr;
+        if (refreshStatus === 401 || refreshStatus === 403) {
+          console.log("[AUTH] Refresh failed with 401/403: Session expired");
+          return null;
+        }
+        throw refreshErr;
         }
       }
+    }
+
+    if (status >= 500) {
+      console.log("[AUTH] Authentication restoration deferred due to server error (" + status + ")");
+      throw err;
     }
 
     console.log("[AUTH] Authentication restoration failed");

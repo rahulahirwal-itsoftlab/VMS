@@ -186,10 +186,12 @@ const POReport = () => {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-        {summaryCards.map((card) => (
-          <ReportSummaryCard key={card.title} {...card} loading={summaryLoading} />
-        ))}
+      <div className="overflow-x-auto custom-scrollbar pb-1">
+        <div className="grid grid-cols-6 min-w-[760px] lg:min-w-0 gap-3 sm:gap-3.5 xl:gap-4">
+          {summaryCards.map((card) => (
+            <ReportSummaryCard key={card.title} {...card} loading={summaryLoading} />
+          ))}
+        </div>
       </div>
 
       {/* Filters */}

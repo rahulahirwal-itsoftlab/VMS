@@ -24,15 +24,16 @@ const ProtectedRoute = ({ children }) => {
 
   if (status === AUTH_STATUS.UNAUTHENTICATED || !isAuthenticated || !user) {
     const rawPath = `${location.pathname}${location.search}${location.hash}`;
+    const redirectPath = rawPath;
     const isInvalid =
       location.pathname === "/404" ||
       location.pathname === "/403" ||
       location.pathname === "/login" ||
       location.pathname === "/";
-    const redirectQuery = isInvalid ? "" : `?redirect=${encodeURIComponent(rawPath)}`;
+    const redirectQuery = isInvalid ? "" : `?redirect=${encodeURIComponent(redirectPath)}`;
     return (
       <Navigate
-        to={`/login${redirectQuery}`}
+        to={redirectQuery ? `/login?redirect=${encodeURIComponent(redirectPath)}` : "/login"}
         state={isInvalid ? undefined : { from: { pathname: rawPath } }}
         replace
       />

@@ -137,7 +137,7 @@ const Navbar = () => {
           >
             <Bell size={18} />
             {showNotificationBadge && (
-              <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0090B8] px-1 text-[10px] font-bold text-white shadow-md animate-pulse">
+              <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0090B8] px-1 text-[10px] font-bold text-white shadow-md">
                 {notificationBadge}
               </span>
             )}

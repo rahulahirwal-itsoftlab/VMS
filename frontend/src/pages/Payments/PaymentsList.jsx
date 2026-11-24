@@ -58,6 +58,7 @@ const PaymentsList = () => {
   const paymentIdParam = searchParams.get("id");
   const location = useLocation();
   const isHistoryPage = location.pathname === "/payment-history";
+  const isCaseManager = (user?.role || "").toUpperCase() === ROLES.CASE_MANAGER;
 
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -105,7 +106,7 @@ const PaymentsList = () => {
       if (activeFilters.method) {
         filtered = filtered.filter((p) => p.paymentMethod === activeFilters.method);
       }
-      if (activeFilters.status) {
+      if (!isCaseManager && activeFilters.status) {
         filtered = filtered.filter(
           (p) => String(p.status).toLowerCase() === String(activeFilters.status).toLowerCase()
         );
@@ -119,7 +120,7 @@ const PaymentsList = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeFilters, isHistoryPage]);
+  }, [activeFilters, isCaseManager, isHistoryPage]);
 
   useEffect(() => {
     loadPayments();
@@ -426,15 +427,23 @@ const PaymentsList = () => {
     {
       key: "status",
       label: "Status",
-      options: [
-        { label: "Pending", value: "PENDING" },
-        { label: "Under Review", value: "INITIATED" },
-        { label: "Approved", value: "APPROVED" },
-        { label: "Rejected", value: "FAILED" },
-        { label: "Returned for Correction", value: "RETURNED" },
-        { label: "Paid", value: "SUCCESS" },
-        { label: "Cancelled", value: "CANCELLED" },
-      ],
+      ...(isCaseManager
+        ? {
+            customOptions: [{ label: "All Status", value: "All Status" }],
+            placeholder: "All Status",
+            defaultValue: "All Status",
+          }
+        : {
+            options: [
+              { label: "Pending", value: "PENDING" },
+              { label: "Under Review", value: "INITIATED" },
+              { label: "Approved", value: "APPROVED" },
+              { label: "Rejected", value: "FAILED" },
+              { label: "Returned for Correction", value: "RETURNED" },
+              { label: "Paid", value: "SUCCESS" },
+              { label: "Cancelled", value: "CANCELLED" },
+            ],
+          }),
     },
   ];
 

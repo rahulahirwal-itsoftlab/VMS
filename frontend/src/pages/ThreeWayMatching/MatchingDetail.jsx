@@ -47,6 +47,7 @@ const resultClass = (item) => {
 const MatchingDetail = () => {
   const { id } = useParams();
   const { user } = useAuth();
+  const isCaseManager = (user?.role || "").toUpperCase() === ROLES.CASE_MANAGER;
 
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -343,12 +344,15 @@ const MatchingDetail = () => {
             <p className="mt-1 text-sm text-slate-500">Identify which checks are MATCHED, MISMATCH, or PENDING.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {[
-              ["ALL", "All"],
-              ["MATCHED", "Matched"],
-              ["MISMATCH", "Mismatched"],
-              ["PENDING", "Pending"],
-            ].map(([value, label]) => (
+            {(isCaseManager
+              ? [["ALL", "All Status"]]
+              : [
+                  ["ALL", "All"],
+                  ["MATCHED", "Matched"],
+                  ["MISMATCH", "Mismatched"],
+                  ["PENDING", "Pending"],
+                ]
+            ).map(([value, label]) => (
               <button
                 key={value}
                 type="button"
@@ -359,7 +363,7 @@ const MatchingDetail = () => {
                     : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                 }`}
               >
-                {label} ({statusCounts[value] || 0})
+                {label} ({isCaseManager && value === "ALL" ? allCheckRows.length : statusCounts[value] || 0})
               </button>
             ))}
           </div>

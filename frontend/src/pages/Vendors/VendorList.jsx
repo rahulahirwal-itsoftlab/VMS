@@ -10,11 +10,10 @@ import {
   X,
   Search,
   Building2,
-  Eye,
-  Edit,
   Clock,
   CheckCircle2,
   XCircle,
+  MapPin,
 } from "lucide-react";
 
 import ConfirmationModal from "../../components/common/ConfirmationModal";
@@ -32,6 +31,7 @@ import {
   approveVendor,
   blockVendor,
   getVendors,
+  getVendorById,
   holdVendor,
   rejectVendor,
   returnVendorToPending,
@@ -44,6 +44,10 @@ const statusOptions = [
   { label: "On Hold / Blocked", value: "blocked" },
   { label: "Approved", value: "approved" },
   { label: "Rejected", value: "rejected" },
+];
+
+const caseManagerStatusOptions = [
+  { label: "All Status", value: "All Status" },
 ];
 
 const initialReviewForm = {
@@ -119,8 +123,7 @@ const StatCard = ({
     <div
       onClick={onClick}
       role="button"
-      tabIndex={0}
-      className={`group relative cursor-pointer rounded-xl sm:rounded-2xl border bg-white dark:bg-slate-900 p-2.5 sm:p-3.5 md:p-4 min-h-24 flex flex-col justify-between shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md dark:shadow-slate-950/40 w-full min-w-0 ${
+      className={`group relative ${onClick ? "cursor-pointer hover:-translate-y-0.5 hover:shadow-md" : "cursor-default"} rounded-xl sm:rounded-2xl border bg-white dark:bg-slate-900 p-2.5 sm:p-3.5 md:p-4 min-h-24 flex flex-col justify-between shadow-sm transition-all duration-200 dark:shadow-slate-950/40 w-full min-w-0 ${
         isActive
           ? `${activeBorders[tone]} bg-slate-50/90 dark:bg-slate-800/90`
           : "border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
@@ -158,6 +161,7 @@ const VendorReviewDrawer = ({
   vendor,
   onClose,
   canManageDocuments = false,
+  loading = false,
 }) => {
   const [activeVendor, setActiveVendor] = useState(vendor);
   const [isOpen, setIsOpen] = useState(false);
@@ -258,21 +262,46 @@ const VendorReviewDrawer = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-          <div className="grid gap-4 md:grid-cols-2">
-            {details.map(([label, value]) => (
-              <div
-                key={label}
-                className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 p-4"
-              >
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  {label}
-                </p>
-                <p className="mt-1 text-sm font-bold text-slate-900 dark:text-slate-100">
-                  {value || "Not provided"}
-                </p>
-              </div>
-            ))}
-          </div>
+          {loading ? (
+            <div className="flex h-64 flex-col items-center justify-center gap-3 text-slate-400">
+              <Loader2 className="animate-spin text-blue-500" size={28} />
+              <p className="text-sm font-medium">Loading vendor details...</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {details.map(([label, value]) => {
+                const isAddress = label === "Address";
+                return (
+                  <div
+                    key={label}
+                    className={`rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 p-4 ${
+                      isAddress ? "md:col-span-2" : ""
+                    }`}
+                  >
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      {isAddress && <MapPin size={13} className="text-blue-500" />}
+                      {label}
+                    </p>
+                    {isAddress && value && value !== "Not provided" ? (
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(value)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 text-sm font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline underline-offset-2 flex items-center gap-1.5 inline-flex cursor-pointer transition-colors"
+                        title="Open address in Google Maps"
+                      >
+                        <span>{value}</span>
+                      </a>
+                    ) : (
+                      <p className="mt-1 text-sm font-bold text-slate-900 dark:text-slate-100">
+                        {value || "Not provided"}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           <div className="mt-6">
             <VendorDocumentsPanel
@@ -289,6 +318,8 @@ const VendorReviewDrawer = ({
 
 const VendorList = () => {
   const { user } = useAuth();
+  const normalizedRole = (user?.role || "").toUpperCase();
+  const isCaseManager = normalizedRole === ROLES.CASE_MANAGER;
   const isFinanceHead = user?.role === ROLES.FINANCE_HEAD;
   const canReviewVendors = hasPermission(user, PERMISSIONS.REVIEW_VENDORS);
   const [vendors, setVendors] = useState([]);
@@ -304,26 +335,54 @@ const VendorList = () => {
     totalPages: 1,
     total: 0,
   });
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState(() => ({
     search: "",
-    status: "",
+    status: isCaseManager ? "All Status" : "",
     page: 1,
     limit: 10,
     sortField: "created_at",
     sortOrder: "desc",
-  });
+  }));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedVendor, setSelectedVendor] = useState(null);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+
+  const handleViewVendorDetails = async (vendorId) => {
+    if (!vendorId) return;
+    try {
+      setDrawerLoading(true);
+      const cached = vendors.find((v) => v.id === vendorId);
+      if (cached) {
+        setSelectedVendor(cached);
+      }
+      const fullVendor = await getVendorById(vendorId);
+      setSelectedVendor(fullVendor);
+    } catch (err) {
+      notify.error(getErrorMessage(err, "Failed to load vendor details."));
+    } finally {
+      setDrawerLoading(false);
+    }
+  };
   const [pendingAction, setPendingAction] = useState(null);
   const [reviewForm, setReviewForm] = useState(initialReviewForm);
   const [actionLoading, setActionLoading] = useState(false);
+
+  useEffect(() => {
+    if (isCaseManager) {
+      setFilters((current) => ({ ...current, status: "All Status" }));
+    }
+  }, [isCaseManager]);
 
   const loadVendors = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
-      const result = await getVendors(filters);
+      const queryFilters = { ...filters };
+      if (isCaseManager) {
+        delete queryFilters.status;
+      }
+      const result = await getVendors(queryFilters);
       setVendors(result.vendors);
       setSummary(result.summary);
       setPagination({
@@ -336,7 +395,7 @@ const VendorList = () => {
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, isCaseManager]);
 
   useEffect(() => {
     loadVendors();
@@ -438,12 +497,15 @@ const VendorList = () => {
           value={summary.pending || 0}
           tone="blue"
           icon={Clock}
-          isActive={filters.status === "pending"}
-          onClick={() =>
-            updateFilter(
-              "status",
-              filters.status === "pending" ? "" : "pending",
-            )
+          isActive={!isCaseManager && filters.status === "pending"}
+          onClick={
+            isCaseManager
+              ? undefined
+              : () =>
+                  updateFilter(
+                    "status",
+                    filters.status === "pending" ? "" : "pending",
+                  )
           }
         />
         <StatCard
@@ -451,12 +513,15 @@ const VendorList = () => {
           value={summary.onHold ?? summary.blocked ?? 0}
           tone="amber"
           icon={AlertTriangle}
-          isActive={filters.status === "blocked"}
-          onClick={() =>
-            updateFilter(
-              "status",
-              filters.status === "blocked" ? "" : "blocked",
-            )
+          isActive={!isCaseManager && filters.status === "blocked"}
+          onClick={
+            isCaseManager
+              ? undefined
+              : () =>
+                  updateFilter(
+                    "status",
+                    filters.status === "blocked" ? "" : "blocked",
+                  )
           }
         />
         <StatCard
@@ -464,12 +529,15 @@ const VendorList = () => {
           value={summary.approved || 0}
           tone="green"
           icon={CheckCircle2}
-          isActive={filters.status === "approved"}
-          onClick={() =>
-            updateFilter(
-              "status",
-              filters.status === "approved" ? "" : "approved",
-            )
+          isActive={!isCaseManager && filters.status === "approved"}
+          onClick={
+            isCaseManager
+              ? undefined
+              : () =>
+                  updateFilter(
+                    "status",
+                    filters.status === "approved" ? "" : "approved",
+                  )
           }
         />
         <StatCard
@@ -477,12 +545,15 @@ const VendorList = () => {
           value={summary.rejected || 0}
           tone="red"
           icon={XCircle}
-          isActive={filters.status === "rejected"}
-          onClick={() =>
-            updateFilter(
-              "status",
-              filters.status === "rejected" ? "" : "rejected",
-            )
+          isActive={!isCaseManager && filters.status === "rejected"}
+          onClick={
+            isCaseManager
+              ? undefined
+              : () =>
+                  updateFilter(
+                    "status",
+                    filters.status === "rejected" ? "" : "rejected",
+                  )
           }
         />
       </div>
@@ -501,10 +572,10 @@ const VendorList = () => {
           </div>
 
           <FilterSelect
-            value={filters.status}
+            value={isCaseManager ? (filters.status || "All Status") : filters.status}
             onChange={(nextValue) => updateFilter("status", nextValue)}
-            options={statusOptions}
-            placeholder="All Statuses"
+            options={isCaseManager ? caseManagerStatusOptions : statusOptions}
+            placeholder="All Status"
             ariaLabel="Vendor status filter"
             className="w-full sm:w-52"
           />
@@ -550,12 +621,8 @@ const VendorList = () => {
                     className="transition hover:bg-slate-50/60 dark:hover:bg-slate-800/40"
                   >
                     <td className="px-5 py-4">
-                      <p className="font-bold text-slate-900 dark:text-slate-100">
-                        {vendor.companyName}
-                      </p>
-                      <p className="mt-0.5 text-xs font-mono text-slate-400">
-                        {vendor.vendorCode}
-                      </p>
+                      <p className="font-semibold text-slate-900">{vendor.companyName}</p>
+                      <p className="mt-1 text-xs text-slate-500">{vendor.vendorCode}</p>
                     </td>
                     <td className="px-5 py-4">
                       <p className="font-medium text-slate-800 dark:text-slate-200">
@@ -564,19 +631,25 @@ const VendorList = () => {
                       <p className="mt-0.5 text-xs text-slate-400">
                         {vendor.email}
                       </p>
+                      <div className="mt-1.5 flex items-center">
+                        <button
+                          type="button"
+                          onClick={() => handleViewVendorDetails(vendor.id)}
+                          className="group inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded text-left"
+                          title="Click to view vendor address & details"
+                          aria-label={`View address for ${vendor.companyName}`}
+                        >
+                          <MapPin size={13} className="shrink-0 text-blue-500 dark:text-blue-400 group-hover:scale-110 transition-transform" />
+                          <span className="truncate max-w-[220px] underline decoration-blue-300 dark:decoration-blue-700 underline-offset-2">
+                            {vendor.address || vendor.vendorAddress || "View Address"}
+                          </span>
+                        </button>
+                      </div>
                     </td>
                     <td className="px-5 py-4 font-medium text-slate-600 dark:text-slate-300">
                       {vendor.category || "Not provided"}
                     </td>
-                    <td className="px-5 py-4">
-                      <StatusBadge
-                        status={
-                          vendor.status === "blocked"
-                            ? "on hold"
-                            : vendor.status
-                        }
-                      />
-                    </td>
+                    <td className="px-5 py-4"><StatusBadge status={vendor.status === "blocked" ? "on hold" : vendor.status} /></td>
                     <td className="px-5 py-4 text-xs font-medium text-slate-400">
                       {vendor.createdBy}
                     </td>
@@ -585,26 +658,27 @@ const VendorList = () => {
                         {isFinanceHead ? (
                           <Link
                             to={`/finance-head/vendors/${vendor.id}/review`}
+                            aria-label={`View details for ${vendor.companyName}`}
+                            className="inline-flex h-9 items-center justify-center rounded-lg border border-blue-200 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline"
                           >
-                            <Button size="sm" variant="subtle" leftIcon={Eye}>
-                              Review
-                            </Button>
+                            View Details
                           </Link>
                         ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            leftIcon={Eye}
-                            onClick={() => setSelectedVendor(vendor)}
+                          <button
+                            type="button"
+                            aria-label={`View details for ${vendor.companyName}`}
+                            className="inline-flex h-9 items-center justify-center rounded-lg border border-blue-200 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline cursor-pointer"
+                            onClick={() => handleViewVendorDetails(vendor.id)}
                           >
-                            View
-                          </Button>
+                            View Details
+                          </button>
                         )}
                         {!isFinanceHead && (
-                          <Link to={`/vendors/${vendor.id}/edit`}>
-                            <Button size="sm" variant="outline" leftIcon={Edit}>
-                              Edit
-                            </Button>
+                          <Link
+                            to={`/vendors/${vendor.id}/edit`}
+                            className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline"
+                          >
+                            Edit
                           </Link>
                         )}
                         {canReviewVendors && canShowReviewActions(vendor) && (
@@ -690,6 +764,7 @@ const VendorList = () => {
         vendor={selectedVendor}
         onClose={() => setSelectedVendor(null)}
         canManageDocuments={canReviewVendors}
+        loading={drawerLoading && !selectedVendor?.companyName}
       />
 
       <ConfirmationModal

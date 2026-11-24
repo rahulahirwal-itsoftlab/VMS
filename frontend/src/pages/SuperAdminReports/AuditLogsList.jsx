@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { History, X, RefreshCw, Eye } from "lucide-react";
+import { History, X, RefreshCw, Eye, Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { getAuditLogs, getAuditLogById } from "../../services/auditService";
 import { getManagersLookup } from "../../services/lookupService";
 import { toast } from "sonner";
@@ -11,6 +12,8 @@ import DateInput from "../../components/common/DateInput";
 
 
 const AuditLogsList = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+
   // ── States ────────────────────────────────────────────────────────────────
   const [logs, setLogs] = useState([]);
   const [total, setTotal] = useState(0);
@@ -19,21 +22,37 @@ const AuditLogsList = () => {
   const [error, setError] = useState(null);
 
   // ── Filters State ─────────────────────────────────────────────────────────
-  const [filters, setFilters] = useState({
-    entityType: "",
-    action: "",
-    performedById: "",
-    dateFrom: "",
-    dateTo: "",
-    page: 1,
+  const [filters, setFilters] = useState(() => ({
+    search: searchParams.get("search") || "",
+    entityType: searchParams.get("entityType") || "",
+    action: searchParams.get("action") || "",
+    status: searchParams.get("status") || "",
+    performedById: searchParams.get("performedById") || "",
+    dateFrom: searchParams.get("dateFrom") || "",
+    dateTo: searchParams.get("dateTo") || "",
+    page: Number(searchParams.get("page")) || 1,
     limit: 15,
-  });
+  }));
 
   // ── Active Lookups & Detail Drawer States ──────────────────────────────────
   const [actorsList, setActorsList] = useState([]);
   const [selectedLog, setSelectedLog] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerLoading, setDrawerLoading] = useState(false);
+
+  // ── Sync URL Search Parameters ───────────────────────────────────────────
+  const syncURL = useCallback((f) => {
+    const params = {};
+    if (f.search && f.search.trim()) params.search = f.search.trim();
+    if (f.entityType) params.entityType = f.entityType;
+    if (f.action) params.action = f.action;
+    if (f.status) params.status = f.status;
+    if (f.performedById) params.performedById = f.performedById;
+    if (f.dateFrom) params.dateFrom = f.dateFrom;
+    if (f.dateTo) params.dateTo = f.dateTo;
+    if (f.page > 1) params.page = String(f.page);
+    setSearchParams(params, { replace: true });
+  }, [setSearchParams]);
 
   // ── Fetch Audit Logs ───────────────────────────────────────────────────────
   const loadLogs = useCallback(async (params) => {
@@ -42,8 +61,10 @@ const AuditLogsList = () => {
       setError(null);
       
       const query = { ...params };
+      if (!query.search || !query.search.trim()) delete query.search;
       if (!query.entityType) delete query.entityType;
       if (!query.action) delete query.action;
+      if (!query.status) delete query.status;
       if (!query.performedById) delete query.performedById;
       if (!query.dateFrom) delete query.dateFrom;
       if (!query.dateTo) delete query.dateTo;
@@ -63,9 +84,23 @@ const AuditLogsList = () => {
   }, []);
 
   useEffect(() => {
-    loadLogs(filters);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.page, filters.entityType, filters.action, filters.performedById, filters.dateFrom, filters.dateTo, loadLogs]);
+    const timer = setTimeout(() => {
+      syncURL(filters);
+      loadLogs(filters);
+    }, filters.search ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [
+    filters.search,
+    filters.entityType,
+    filters.action,
+    filters.status,
+    filters.performedById,
+    filters.dateFrom,
+    filters.dateTo,
+    filters.page,
+    syncURL,
+    loadLogs,
+  ]);
 
   // Load actors lookup cache once
   useEffect(() => {
@@ -85,15 +120,20 @@ const AuditLogsList = () => {
   };
 
   const resetFilters = () => {
-    setFilters({
+    const defaultFilters = {
+      search: "",
       entityType: "",
       action: "",
+      status: "",
       performedById: "",
       dateFrom: "",
       dateTo: "",
       page: 1,
       limit: 15,
-    });
+    };
+    setFilters(defaultFilters);
+    setSearchParams({}, { replace: true });
+    loadLogs(defaultFilters);
   };
 
   // ── Open Detail Drawer ─────────────────────────────────────────────────────
@@ -121,21 +161,59 @@ const AuditLogsList = () => {
   return (
     <div className="space-y-6 relative select-none">
       {/* Navigation Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <History size={28} className="text-slate-600" />
+          <History size={28} className="text-slate-600 dark:text-slate-400 shrink-0" />
           <div>
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">Operational Audit Logs</h1>
-            <p className="mt-1 text-slate-500">Read-only historical trail of system modifications and administrative events</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100">Operational Audit Logs</h1>
+            <p className="mt-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">Read-only historical trail of system modifications and administrative events</p>
           </div>
         </div>
+
+        {/* Refresh button at extreme top-right corner of the Operational Audit Log section */}
+        <button
+          type="button"
+          onClick={() => loadLogs(filters)}
+          disabled={loading}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 text-sm font-semibold text-slate-700 dark:text-slate-200 shadow-2xs hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white hover:border-slate-400 dark:hover:border-slate-600 transition disabled:opacity-60 shrink-0 self-start sm:self-auto"
+          title="Refresh operational audit logs"
+          aria-label="Refresh"
+        >
+          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+          <span>Refresh</span>
+        </button>
       </div>
 
       {/* Filters Toolbar */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm dark:shadow-slate-950/40 space-y-4">
-        <div className="flex flex-wrap gap-4 items-center">
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm dark:shadow-slate-950/40">
+        <div className="flex flex-wrap gap-4 items-end">
+          {/* Search Input */}
+          <div className="flex flex-col flex-1 min-w-full sm:min-w-[220px] lg:min-w-[200px]">
+            <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Search</label>
+            <div className="relative w-full">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={filters.search}
+                onChange={(e) => handleFilterChange("search", e.target.value)}
+                placeholder="Search audit logs..."
+                className="h-10 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 pl-9 pr-8 text-sm font-medium text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 shadow-sm outline-none transition-all hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900 focus:border-blue-500 dark:focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              />
+              {filters.search && (
+                <button
+                  type="button"
+                  onClick={() => handleFilterChange("search", "")}
+                  className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600 transition"
+                  title="Clear search"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Entity Type Filter */}
-          <div className="flex flex-col">
+          <div className="flex flex-col flex-1 min-w-full sm:min-w-[170px] lg:min-w-[150px] xl:min-w-[140px]">
             <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Entity Scope</label>
             <FilterSelect
               value={filters.entityType}
@@ -150,12 +228,12 @@ const AuditLogsList = () => {
                 { value: "three_way_match", label: "3-Way Match" },
               ]}
               placeholder="All Entities"
-              className="w-48"
+              className="w-full"
             />
           </div>
 
           {/* Action Filter */}
-          <div className="flex flex-col">
+          <div className="flex flex-col flex-1 min-w-full sm:min-w-[170px] lg:min-w-[150px] xl:min-w-[140px]">
             <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Operation Type</label>
             <FilterSelect
               value={filters.action}
@@ -172,12 +250,32 @@ const AuditLogsList = () => {
                 { value: "payment_processed", label: "Payment Processed" },
               ]}
               placeholder="All Actions"
-              className="w-48"
+              className="w-full"
+            />
+          </div>
+
+          {/* Status Filter */}
+          <div className="flex flex-col flex-1 min-w-full sm:min-w-[150px] lg:min-w-[130px] xl:min-w-[120px]">
+            <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Status</label>
+            <FilterSelect
+              value={filters.status}
+              onChange={(nextValue) => handleFilterChange("status", nextValue)}
+              options={[
+                { value: "", label: "All Status" },
+                { value: "PENDING", label: "Pending" },
+                { value: "APPROVED", label: "Approved" },
+                { value: "REJECTED", label: "Rejected" },
+                { value: "ACTIVE", label: "Active" },
+                { value: "INACTIVE", label: "Inactive" },
+                { value: "PAID", label: "Paid" },
+              ]}
+              placeholder="All Status"
+              className="w-full"
             />
           </div>
 
           {/* Actor Select Filter */}
-          <div className="flex flex-col">
+          <div className="flex flex-col flex-1 min-w-full sm:min-w-[180px] lg:min-w-[160px] xl:min-w-[150px]">
             <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Performed By</label>
             <FilterSelect
               value={filters.performedById}
@@ -187,51 +285,34 @@ const AuditLogsList = () => {
                 ...actorsList.map((actor) => ({ value: actor.value, label: actor.name })),
               ]}
               placeholder="All Administrators"
-              className="w-56"
+              className="w-full"
             />
           </div>
 
           {/* Date Range Filters */}
-          <div className="flex flex-col">
+          <div className="flex flex-col flex-1 min-w-full sm:min-w-[160px] lg:min-w-[145px] xl:min-w-[135px]">
             <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Date From</label>
             <DateInput
               value={filters.dateFrom}
               max={filters.dateTo || undefined}
               onChange={(nextValue) => handleFilterChange("dateFrom", nextValue)}
               ariaLabel="Audit log date from"
+              className="w-full"
             />
           </div>
 
-          <div className="flex flex-col">
+          <div className="flex flex-col flex-1 min-w-full sm:min-w-[160px] lg:min-w-[145px] xl:min-w-[135px]">
             <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Date To</label>
             <DateInput
               value={filters.dateTo}
               min={filters.dateFrom || undefined}
               onChange={(nextValue) => handleFilterChange("dateTo", nextValue)}
               ariaLabel="Audit log date to"
+              className="w-full"
             />
-          </div>
-
-          {/* Buttons */}
-          <div className="flex items-end gap-2.5 h-full pt-5">
-            <button
-              onClick={() => loadLogs(filters)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-600 hover:bg-slate-50 transition"
-              title="Refresh log feed"
-            >
-              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-              Refresh
-            </button>
-            <button
-              onClick={resetFilters}
-              className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-600 hover:bg-slate-50 transition"
-            >
-              Reset Filters
-            </button>
           </div>
         </div>
       </div>
-
       {/* Error Panel */}
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">

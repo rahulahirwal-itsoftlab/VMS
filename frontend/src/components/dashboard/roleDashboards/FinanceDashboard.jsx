@@ -30,6 +30,8 @@ import FilterSelect from "../../common/FilterSelect";
 
 const STATUS_COLORS = ["#0090B8", "#1E3A5F", "#0EA5E9", "#2DD4BF", "#F59E0B"];
 
+const STATUS_OPTIONS = [{ label: "All Status", value: "All Status" }];
+
 const safeNumber = (value) => {
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -197,6 +199,7 @@ const FinanceDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All Status");
   const [filters, setFilters] = useState({
     preset: "last30",
     groupBy: "day",
@@ -300,6 +303,15 @@ const FinanceDashboard = () => {
             onChange={(nextValue) => updateFilter("preset", nextValue)}
             options={DATE_PRESETS}
             ariaLabel="Dashboard date preset"
+          />
+
+          <FilterSelect
+            className="w-44"
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={STATUS_OPTIONS}
+            placeholder="All Status"
+            ariaLabel="Finance record status filter"
           />
 
           <button

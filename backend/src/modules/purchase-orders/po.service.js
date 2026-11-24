@@ -16,11 +16,78 @@ const ALLOWED_CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED'];
 const DEFAULT_GST_RATE = Number(process.env.DEFAULT_PO_GST_RATE || 0);
 const COMPANY_STATE = String(process.env.COMPANY_STATE || process.env.DEFAULT_COMPANY_STATE || '').trim().toLowerCase();
 
+const ensurePurchaseOrderNumberSequence = async () => {
+  await prisma.$executeRawUnsafe(`
+    CREATE SEQUENCE IF NOT EXISTS purchase_order_number_seq START WITH 1 INCREMENT BY 1;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    DECLARE
+      max_po_number bigint;
+      seq_last_val bigint;
+    BEGIN
+      SELECT COALESCE(MAX((regexp_match(po_number, '([0-9]+)$'))[1]::bigint), 0)
+      INTO max_po_number
+      FROM purchase_orders
+      WHERE po_number ~ '[0-9]+$';
+
+      SELECT last_value INTO seq_last_val FROM purchase_order_number_seq;
+
+      IF max_po_number > seq_last_val THEN
+        PERFORM setval('purchase_order_number_seq', max_po_number, true);
+      ELSIF seq_last_val < 1 THEN
+        PERFORM setval('purchase_order_number_seq', 1, false);
+      END IF;
+    END $$;
+  `);
+};
+
 const generatePoNumber = async () => {
   const year = new Date().getFullYear();
-  const rows = await prisma.$queryRaw`SELECT nextval('purchase_order_number_seq')::bigint AS value`;
-  const nextValue = Number(rows?.[0]?.value || 0);
-  return `PO/${year}/${String(nextValue).padStart(6, '0')}`;
+  let nextValue = null;
+
+  try {
+    const rows = await prisma.$queryRaw`SELECT nextval('purchase_order_number_seq')::bigint AS value`;
+    nextValue = Number(rows?.[0]?.value || 0);
+  } catch (error) {
+    if (error?.code === 'P2010' || String(error?.message || '').includes('purchase_order_number_seq')) {
+      try {
+        await ensurePurchaseOrderNumberSequence();
+        const rows = await prisma.$queryRaw`SELECT nextval('purchase_order_number_seq')::bigint AS value`;
+        nextValue = Number(rows?.[0]?.value || 0);
+      } catch (_seqError) {
+        // Fallback using max po_number in DB
+        const lastPO = await prisma.purchaseOrder.findFirst({
+          where: { po_number: { startsWith: `PO-${year}` } },
+          orderBy: { po_number: 'desc' },
+          select: { po_number: true },
+        });
+        const match = lastPO?.po_number?.match(/(\d+)$/);
+        nextValue = (match ? parseInt(match[1], 10) : 0) + 1;
+      }
+    } else {
+      throw error;
+    }
+  }
+
+  const formattedSeq = String(nextValue).padStart(4, '0');
+  let candidate = `PO-${year}-${formattedSeq}`;
+
+  let exists = await prisma.purchaseOrder.findUnique({
+    where: { po_number: candidate },
+    select: { id: true },
+  });
+  while (exists) {
+    nextValue += 1;
+    candidate = `PO-${year}-${String(nextValue).padStart(4, '0')}`;
+    exists = await prisma.purchaseOrder.findUnique({
+      where: { po_number: candidate },
+      select: { id: true },
+    });
+  }
+
+  return candidate;
 };
 
 const roundMoney = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;

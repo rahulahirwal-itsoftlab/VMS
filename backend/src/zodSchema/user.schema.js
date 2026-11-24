@@ -12,18 +12,59 @@ const optionalText = (field, max = 100) => z.string()
   .max(max, `${field} must be ${max} characters or less`)
   .optional()
   .or(z.literal(''));
-const phoneSchema = z.preprocess((value) => {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === 'string') return value.trim();
-  return value;
+
+export const validateIndianPhoneString = (raw) => {
+  if (raw === undefined || raw === null) return { isValid: true, value: undefined };
+  const str = String(raw).trim();
+  if (str === '') return { isValid: true, value: '' };
+
+  // Remove spaces, hyphens, parentheses, dots
+  const cleaned = str.replace(/[\s\-\(\)\.]/g, '');
+  let nationalNumber = cleaned;
+  let formatted = cleaned;
+
+  if (cleaned.startsWith('+91')) {
+    nationalNumber = cleaned.slice(3);
+    formatted = '+91' + nationalNumber;
+  } else if (cleaned.startsWith('+')) {
+    return { isValid: false, message: 'Invalid Phone Number' };
+  } else if (cleaned.startsWith('91') && cleaned.length === 12) {
+    nationalNumber = cleaned.slice(2);
+    formatted = '+91' + nationalNumber;
+  } else if (cleaned.startsWith('0') && cleaned.length === 11) {
+    nationalNumber = cleaned.slice(1);
+    formatted = nationalNumber;
+  }
+
+  // Indian mobile: exactly 10 digits starting with 6, 7, 8, or 9
+  if (!/^[6-9]\d{9}$/.test(nationalNumber)) {
+    return { isValid: false, message: 'Invalid Phone Number' };
+  }
+  return { isValid: true, value: formatted, nationalNumber };
+};
+
+const phoneSchema = z.preprocess((val) => {
+  if (val === undefined || val === null) return undefined;
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return '';
+    const res = validateIndianPhoneString(trimmed);
+    if (res.isValid) return res.value;
+  }
+  return val;
 }, z.string()
-  .regex(/^\d{10}$/, 'Phone number must contain exactly 10 digits.')
+  .refine((val) => {
+    if (!val) return true;
+    return validateIndianPhoneString(val).isValid;
+  }, { message: 'Invalid Phone Number' })
   .optional()
   .or(z.literal('')));
 
 const profilePhoneRules = (data) => {
   if (!data.phone || !data.alternatePhone) return true;
-  return data.phone !== data.alternatePhone;
+  const p1 = String(data.phone).replace(/\D/g, '').slice(-10);
+  const p2 = String(data.alternatePhone).replace(/\D/g, '').slice(-10);
+  return p1 !== p2;
 };
 
 export const createUserSchema = z.object({

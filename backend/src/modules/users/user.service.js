@@ -457,7 +457,9 @@ class UserService {
     const nextAlternatePhone = mappedUpdateData[UserEntity.columns.ALTERNATE_PHONE] !== undefined
       ? mappedUpdateData[UserEntity.columns.ALTERNATE_PHONE]
       : targetUser.alternate_phone;
-    if (nextPhone && nextAlternatePhone && nextPhone === nextAlternatePhone) {
+    const p1 = nextPhone ? String(nextPhone).replace(/\D/g, '').slice(-10) : '';
+    const p2 = nextAlternatePhone ? String(nextAlternatePhone).replace(/\D/g, '').slice(-10) : '';
+    if (p1 && p2 && p1 === p2) {
       throw new ApiError(400, 'Alternate phone must be different from phone.');
     }
     if (updateData.role !== undefined) {

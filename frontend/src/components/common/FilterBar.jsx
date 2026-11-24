@@ -17,8 +17,8 @@ const FilterBar = ({ onFilterChange, filters = [] }) => {
     onFilterChange({});
   };
 
-  const activeCount = Object.values(activeFilters).filter((v) =>
-    Boolean(v),
+  const activeCount = Object.entries(activeFilters).filter(
+    ([, v]) => Boolean(v) && v !== "All Status",
   ).length;
 
   return (
@@ -59,15 +59,20 @@ const FilterBar = ({ onFilterChange, filters = [] }) => {
               <div key={filter.key}>
                 <FilterSelect
                   label={filter.label}
-                  value={activeFilters[filter.key] || ""}
+                  value={
+                    activeFilters[filter.key] ??
+                    (filter.defaultValue || "")
+                  }
                   onChange={(nextValue) =>
                     handleFilterChange(filter.key, nextValue)
                   }
-                  options={[
-                    { value: "", label: "All" },
-                    ...(filter.options || []),
-                  ]}
-                  placeholder="All"
+                  options={
+                    filter.customOptions || [
+                      { value: "", label: "All" },
+                      ...(filter.options || []),
+                    ]
+                  }
+                  placeholder={filter.placeholder || "All"}
                 />
               </div>
             ))}

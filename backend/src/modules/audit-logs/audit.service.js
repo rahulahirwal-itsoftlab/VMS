@@ -132,6 +132,27 @@ class AuditService {
         ],
       });
     }
+    if (query.search && query.search.trim()) {
+      const searchTerm = query.search.trim();
+      andFilters.push({
+        OR: [
+          { remarks: { contains: searchTerm, mode: 'insensitive' } },
+          { action: { contains: searchTerm, mode: 'insensitive' } },
+          { entity_type: { contains: searchTerm, mode: 'insensitive' } },
+          { entity_id: { contains: searchTerm, mode: 'insensitive' } },
+          {
+            performed_by: {
+              OR: [
+                { first_name: { contains: searchTerm, mode: 'insensitive' } },
+                { last_name: { contains: searchTerm, mode: 'insensitive' } },
+                { email: { contains: searchTerm, mode: 'insensitive' } },
+                { employee_id: { contains: searchTerm, mode: 'insensitive' } },
+              ],
+            },
+          },
+        ],
+      });
+    }
 
     const where = {
       ...(andFilters.length ? { AND: andFilters } : {}),
@@ -143,7 +164,11 @@ class AuditService {
         ? {
             created_at: {
               ...(query.dateFrom && { gte: new Date(query.dateFrom) }),
-              ...(query.dateTo && { lte: new Date(query.dateTo) }),
+              ...(query.dateTo && {
+                lte: query.dateTo.includes('T')
+                  ? new Date(query.dateTo)
+                  : new Date(query.dateTo + 'T23:59:59.999Z'),
+              }),
             },
           }
         : {}),

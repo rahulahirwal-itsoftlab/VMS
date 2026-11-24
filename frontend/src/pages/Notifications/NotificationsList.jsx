@@ -22,6 +22,8 @@ import {
   markRead,
 } from "../../services/notificationService";
 import { useNotifications } from "../../context/NotificationContext";
+import { useAuth } from "../../context/AuthContext";
+import { ROLES } from "../../config/permissions";
 import LoadingSpinner from "../../components/common/LoadingSpinner";
 import FilterSelect from "../../components/common/FilterSelect";
 import DateInput from "../../components/common/DateInput";
@@ -48,6 +50,8 @@ const formatDateTime = (value) => {
 };
 
 const NotificationsList = () => {
+  const { user } = useAuth();
+  const isCaseManager = (user?.role || "").toUpperCase() === ROLES.CASE_MANAGER;
   const { refreshUnreadCount } = useNotifications();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -68,13 +72,13 @@ const NotificationsList = () => {
       page,
       limit: PAGE_SIZE,
     };
-    if (readFilter === "read") params.isRead = true;
-    if (readFilter === "unread") params.isRead = false;
+    if (!isCaseManager && readFilter === "read") params.isRead = true;
+    if (!isCaseManager && readFilter === "unread") params.isRead = false;
     if (entityTypeFilter !== "all") params.entityType = entityTypeFilter;
     if (createdFrom) params.createdFrom = createdFrom;
     if (createdTo) params.createdTo = createdTo;
     return params;
-  }, [createdFrom, createdTo, entityTypeFilter, page, readFilter]);
+  }, [createdFrom, createdTo, entityTypeFilter, isCaseManager, page, readFilter]);
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -202,11 +206,16 @@ const NotificationsList = () => {
                 setReadFilter(nextValue);
                 setPage(1);
               }}
-              options={[
-                { value: "all", label: "All" },
-                { value: "unread", label: "Unread" },
-                { value: "read", label: "Read" },
-              ]}
+              options={
+                isCaseManager
+                  ? [{ value: "all", label: "All Status" }]
+                  : [
+                      { value: "all", label: "All" },
+                      { value: "unread", label: "Unread" },
+                      { value: "read", label: "Read" },
+                    ]
+              }
+              placeholder="All Status"
               ariaLabel="Notification status filter"
             />
           </label>

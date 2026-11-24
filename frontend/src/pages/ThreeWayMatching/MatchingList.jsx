@@ -45,7 +45,17 @@ const MatchingList = () => {
   const [receiverName, setReceiverName] = useState(user?.first_name || "");
   const [remarks, setRemarks] = useState("");
   const [validationErrors, setValidationErrors] = useState([]);
-  const [statusFilter, setStatusFilter] = useState("");
+  const isCaseManager = (user?.role || "").toUpperCase() === ROLES.CASE_MANAGER;
+  const [statusFilter, setStatusFilter] = useState(() =>
+    isCaseManager ? "All Status" : "",
+  );
+
+  useEffect(() => {
+    if (isCaseManager) {
+      setStatusFilter("All Status");
+    }
+  }, [isCaseManager]);
+
   const errorsByField = validationErrors.reduce(
     (acc, error) => ({ ...acc, [error.field]: error.message }),
     {},
@@ -57,8 +67,10 @@ const MatchingList = () => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
+      const matchParams =
+        !isCaseManager && statusFilter ? { status: statusFilter } : {};
       const [matchesData, invoicesData] = await Promise.all([
-        getMatches(statusFilter ? { status: statusFilter } : {}),
+        getMatches(matchParams),
         canRunMatching ? getInvoices() : Promise.resolve([]),
       ]);
       setMatches(matchesData);
@@ -73,7 +85,7 @@ const MatchingList = () => {
     } finally {
       setLoading(false);
     }
-  }, [canRunMatching, statusFilter]);
+  }, [canRunMatching, isCaseManager, statusFilter]);
 
   useEffect(() => {
     loadData();
@@ -366,16 +378,25 @@ const MatchingList = () => {
               <div className="flex items-center gap-2">
                 <Filter className="h-4 w-4 text-slate-400" />
                 <FilterSelect
-                  value={statusFilter}
+                  value={
+                    isCaseManager
+                      ? statusFilter || "All Status"
+                      : statusFilter
+                  }
                   onChange={setStatusFilter}
-                  options={[
-                    { value: "", label: "All Statuses" },
-                    { value: "MATCHED", label: "Matched" },
-                    { value: "MISMATCH", label: "Mismatched" },
-                    { value: "PENDING", label: "Pending" },
-                  ]}
-                  placeholder="All Statuses"
+                  options={
+                    isCaseManager
+                      ? [{ value: "All Status", label: "All Status" }]
+                      : [
+                          { value: "", label: "All Statuses" },
+                          { value: "MATCHED", label: "Matched" },
+                          { value: "MISMATCH", label: "Mismatched" },
+                          { value: "PENDING", label: "Pending" },
+                        ]
+                  }
+                  placeholder="All Status"
                   className="w-48"
+                  ariaLabel="Matching status filter"
                 />
               </div>
             }

@@ -45,10 +45,43 @@ const formatDate = (value) => {
   });
 };
 
+const APPROVAL_STATUS_OPTIONS = [
+  { value: "", label: "All Status" },
+  { value: "APPROVED", label: "Approved" },
+  {
+    value: "PENDING_THREE_WAY_MATCH",
+    label: "Pending Three-Way Match",
+  },
+  {
+    value: "PENDING_ADMIN_REVIEW",
+    label: "Pending Admin Review",
+  },
+  { value: "PENDING_TEAM_LEAD", label: "Pending Team Lead" },
+  { value: "PENDING_MANAGER", label: "Pending Manager" },
+  {
+    value: "PENDING_FINANCE_HEAD",
+    label: "Pending Finance Head",
+  },
+  { value: "REJECTED", label: "Rejected" },
+];
+
+const PAYMENT_STATUS_OPTIONS = [
+  { value: "", label: "All Payment Status" },
+  { value: "UNPAID", label: "Unpaid" },
+  { value: "PARTIALLY_PAID", label: "Partially Paid" },
+  { value: "PAID", label: "Paid" },
+  { value: "OVERDUE", label: "Overdue" },
+];
+
+const CASE_MANAGER_STATUS_OPTIONS = [
+  { value: "All Status", label: "All Status" },
+];
+
 const InvoiceList = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const normalizedRole = (user?.role || "").toUpperCase();
+  const isCaseManager = normalizedRole === ROLES.CASE_MANAGER;
 
   const [invoices, setInvoices] = useState([]);
   const [pagination, setPagination] = useState({
@@ -61,8 +94,17 @@ const InvoiceList = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState(() =>
+    isCaseManager ? "All Status" : "",
+  );
   const [paymentStatusFilter, setPaymentStatusFilter] = useState("");
+
+  useEffect(() => {
+    if (isCaseManager) {
+      setStatusFilter("All Status");
+      setPaymentStatusFilter("");
+    }
+  }, [isCaseManager]);
 
   // Responsive view mode state: default to 'cards' on mobile (< 768px), 'table' on desktop
   const [viewMode, setViewMode] = useState(() =>
@@ -93,8 +135,8 @@ const InvoiceList = () => {
         };
 
         if (search.trim()) params.search = search.trim();
-        if (statusFilter) params.status = statusFilter;
-        if (paymentStatusFilter) params.paymentStatus = paymentStatusFilter;
+        if (!isCaseManager && statusFilter) params.status = statusFilter;
+        if (!isCaseManager && paymentStatusFilter) params.paymentStatus = paymentStatusFilter;
 
         const response = await getInvoices(params);
 
@@ -122,6 +164,7 @@ const InvoiceList = () => {
       statusFilter,
       paymentStatusFilter,
       pagination.page,
+      isCaseManager,
     ],
   );
 
@@ -175,13 +218,19 @@ const InvoiceList = () => {
   };
 
   const hasActiveFilters = Boolean(
-    search.trim() || statusFilter || paymentStatusFilter,
+    search.trim() ||
+      (!isCaseManager && (statusFilter || paymentStatusFilter)),
   );
 
   const handleClearFilters = () => {
     setSearch("");
-    setStatusFilter("");
-    setPaymentStatusFilter("");
+    if (isCaseManager) {
+      setStatusFilter("All Status");
+      setPaymentStatusFilter("");
+    } else {
+      setStatusFilter("");
+      setPaymentStatusFilter("");
+    }
   };
 
   const handleSelectViewMode = (mode) => {
@@ -345,45 +394,34 @@ const InvoiceList = () => {
 
           {/* Filter Selects & Actions */}
           <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:flex-wrap lg:flex-nowrap">
-            <FilterSelect
-              value={statusFilter}
-              onChange={setStatusFilter}
-              options={[
-                { value: "", label: "All Approval Statuses" },
-                { value: "APPROVED", label: "Approved" },
-                {
-                  value: "PENDING_THREE_WAY_MATCH",
-                  label: "Pending Three-Way Match",
-                },
-                {
-                  value: "PENDING_ADMIN_REVIEW",
-                  label: "Pending Admin Review",
-                },
-                { value: "PENDING_TEAM_LEAD", label: "Pending Team Lead" },
-                { value: "PENDING_MANAGER", label: "Pending Manager" },
-                {
-                  value: "PENDING_FINANCE_HEAD",
-                  label: "Pending Finance Head",
-                },
-                { value: "REJECTED", label: "Rejected" },
-              ]}
-              placeholder="All Approval Statuses"
-              className="w-full sm:w-56"
-            />
+            {isCaseManager ? (
+              <FilterSelect
+                value={statusFilter || "All Status"}
+                onChange={setStatusFilter}
+                options={CASE_MANAGER_STATUS_OPTIONS}
+                placeholder="All Status"
+                className="w-full sm:w-56"
+                ariaLabel="Invoice status filter"
+              />
+            ) : (
+              <>
+                <FilterSelect
+                  value={statusFilter}
+                  onChange={setStatusFilter}
+                  options={APPROVAL_STATUS_OPTIONS}
+                  placeholder="All Status"
+                  className="w-full sm:w-56"
+                />
 
-            <FilterSelect
-              value={paymentStatusFilter}
-              onChange={setPaymentStatusFilter}
-              options={[
-                { value: "", label: "All Payment Statuses" },
-                { value: "UNPAID", label: "Unpaid" },
-                { value: "PARTIALLY_PAID", label: "Partially Paid" },
-                { value: "PAID", label: "Paid" },
-                { value: "OVERDUE", label: "Overdue" },
-              ]}
-              placeholder="All Payment Statuses"
-              className="w-full sm:w-52"
-            />
+                <FilterSelect
+                  value={paymentStatusFilter}
+                  onChange={setPaymentStatusFilter}
+                  options={PAYMENT_STATUS_OPTIONS}
+                  placeholder="All Payment Status"
+                  className="w-full sm:w-52"
+                />
+              </>
+            )}
 
             {hasActiveFilters && (
               <button
@@ -416,7 +454,7 @@ const InvoiceList = () => {
                 </button>
               </span>
             )}
-            {statusFilter && (
+            {!isCaseManager && statusFilter && (
               <span className="inline-flex items-center gap-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
                 Approval: {statusFilter.replaceAll("_", " ")}
                 <button
@@ -428,7 +466,7 @@ const InvoiceList = () => {
                 </button>
               </span>
             )}
-            {paymentStatusFilter && (
+            {!isCaseManager && paymentStatusFilter && (
               <span className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/60 px-2 py-0.5 text-xs text-indigo-700 dark:text-indigo-300">
                 Payment: {paymentStatusFilter.replaceAll("_", " ")}
                 <button

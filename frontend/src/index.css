@@ -488,3 +488,18 @@ iframe, embed, object {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* ------------------------------------------------------------
+   HIDE DATALIST DROPDOWN ARROWS (Designation & Region)
+------------------------------------------------------------ */
+.no-datalist-arrow::-webkit-calendar-picker-indicator,
+#designation::-webkit-calendar-picker-indicator,
+#region::-webkit-calendar-picker-indicator,
+#edit-designation::-webkit-calendar-picker-indicator,
+#edit-region::-webkit-calendar-picker-indicator {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  -webkit-appearance: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}

@@ -32,6 +32,35 @@ const passwordRules = [
   { label: "One special character", test: (value) => /[^A-Za-z0-9]/.test(value) },
 ];
 
+export const validateIndianPhone = (value) => {
+  if (value === undefined || value === null) return { isValid: true, normalized: "" };
+  const str = String(value).trim();
+  if (str === "") return { isValid: true, normalized: "" };
+
+  const cleaned = str.replace(/[\s().-]/g, "");
+  let nationalNumber = cleaned;
+  let formatted = cleaned;
+
+  if (cleaned.startsWith("+91")) {
+    nationalNumber = cleaned.slice(3);
+    formatted = "+91" + nationalNumber;
+  } else if (cleaned.startsWith("+")) {
+    return { isValid: false, message: "Invalid Phone Number" };
+  } else if (cleaned.startsWith("91") && cleaned.length === 12) {
+    nationalNumber = cleaned.slice(2);
+    formatted = "+91" + nationalNumber;
+  } else if (cleaned.startsWith("0") && cleaned.length === 11) {
+    nationalNumber = cleaned.slice(1);
+    formatted = nationalNumber;
+  }
+
+  if (!/^[6-9]\d{9}$/.test(nationalNumber)) {
+    return { isValid: false, message: "Invalid Phone Number" };
+  }
+
+  return { isValid: true, normalized: formatted, nationalNumber };
+};
+
 const UserCreate = () => {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
@@ -112,7 +141,7 @@ const UserCreate = () => {
     const { name, value, type, checked } = e.target;
     let finalValue = type === "checkbox" ? checked : value;
     if (name === "phone" || name === "alternatePhone") {
-      finalValue = value.replace(/\D/g, "");
+      finalValue = value.replace(/[^\d+\s-]/g, "");
     }
     setFormData((prev) => ({
       ...prev,
@@ -139,17 +168,26 @@ const UserCreate = () => {
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       errors.email = "Invalid email format";
     }
-    const phonePattern = /^\d{10}$/;
     const phone = formData.phone.trim();
     const alternatePhone = formData.alternatePhone.trim();
-    if (phone && !phonePattern.test(phone)) {
-      errors.phone = "Phone number must contain exactly 10 digits.";
+    if (phone) {
+      const phoneRes = validateIndianPhone(phone);
+      if (!phoneRes.isValid) {
+        errors.phone = "Invalid Phone Number";
+      }
     }
-    if (alternatePhone && !phonePattern.test(alternatePhone)) {
-      errors.alternatePhone = "Phone number must contain exactly 10 digits.";
+    if (alternatePhone) {
+      const altRes = validateIndianPhone(alternatePhone);
+      if (!altRes.isValid) {
+        errors.alternatePhone = "Invalid Phone Number";
+      }
     }
-    if (phone && alternatePhone && phone === alternatePhone) {
-      errors.alternatePhone = "Alternate phone must be different from phone";
+    if (phone && alternatePhone) {
+      const p1 = validateIndianPhone(phone).nationalNumber;
+      const p2 = validateIndianPhone(alternatePhone).nationalNumber;
+      if (p1 && p2 && p1 === p2) {
+        errors.alternatePhone = "Alternate phone must be different from phone";
+      }
     }
 
     if (!formData.role) {
@@ -189,8 +227,8 @@ const UserCreate = () => {
       firstName: formData.firstName.trim(),
       lastName: formData.lastName.trim(),
       email: formData.email.trim().toLowerCase(),
-      phone: formData.phone.trim(),
-      alternatePhone: formData.alternatePhone.trim(),
+      phone: validateIndianPhone(formData.phone).normalized || "",
+      alternatePhone: validateIndianPhone(formData.alternatePhone).normalized || "",
       designation: formData.designation.trim(),
       branch: formData.branch.trim(),
       region: formData.region.trim(),
@@ -332,9 +370,9 @@ const UserCreate = () => {
                   name="phone"
                   value={formData.phone}
                   onChange={handleChange}
-                  placeholder="9876543210"
-                  inputMode="numeric"
-                  maxLength={10}
+                  placeholder="9876543210 or +91 98765 43210"
+                  inputMode="tel"
+                  maxLength={16}
                   className={`${inputClass} ${fieldErrors.phone ? 'border-red-500' : ''}`}
                   disabled={submitting}
                 />
@@ -351,9 +389,9 @@ const UserCreate = () => {
                   name="alternatePhone"
                   value={formData.alternatePhone}
                   onChange={handleChange}
-                  placeholder="9876543211"
-                  inputMode="numeric"
-                  maxLength={10}
+                  placeholder="9876543211 or +91 98765 43211"
+                  inputMode="tel"
+                  maxLength={16}
                   className={`${inputClass} ${fieldErrors.alternatePhone ? 'border-red-500' : ''}`}
                   disabled={submitting}
                 />
@@ -372,7 +410,7 @@ const UserCreate = () => {
                   onChange={handleChange}
                   list="designation-options"
                   placeholder="Enter designation"
-                  className={inputClass}
+                  className={`${inputClass} no-datalist-arrow`}
                   disabled={submitting}
                 />
                 <datalist id="designation-options">
@@ -412,7 +450,7 @@ const UserCreate = () => {
                   onChange={handleChange}
                   list="region-options"
                   placeholder="Enter region"
-                  className={inputClass}
+                  className={`${inputClass} no-datalist-arrow`}
                   disabled={submitting}
                 />
                 <datalist id="region-options">

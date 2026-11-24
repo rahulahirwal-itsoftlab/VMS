@@ -48,6 +48,7 @@ import {
   USER_ACCOUNT_STATUS_OPTIONS,
 } from "../../constants/userAccountStatus";
 import ConfirmationModal from "../../components/common/ConfirmationModal";
+import { validateIndianPhone } from "./UserCreate";
 import { getErrorMessage, notify } from "../../utils/feedback";
 import { formatRoleLabel } from "../../utils/displayFormatters";
 import { inputClass as sharedInputClass } from "../../utils/formStyles";
@@ -302,7 +303,7 @@ const UsersList = () => {
     const { name, value, type, checked } = e.target;
     let finalValue = type === "checkbox" ? checked : value;
     if (name === "phone" || name === "alternatePhone") {
-      finalValue = value.replace(/\D/g, "");
+      finalValue = value.replace(/[^\d+\s-]/g, "");
     }
     setEditForm((prev) => ({
       ...prev,
@@ -339,16 +340,17 @@ const UsersList = () => {
       errors.superAdminConfirmed =
         "Confirmation required to assign Super Admin authority";
     }
-    const phonePattern = /^\d{10}$/;
-    const phone = editForm.phone.trim();
-    const alternatePhone = editForm.alternatePhone.trim();
-    if (phone && !phonePattern.test(phone)) {
-      errors.phone = "Phone number must contain exactly 10 digits.";
+    const phoneRes = validateIndianPhone(editForm.phone);
+    if (editForm.phone && !phoneRes.isValid) {
+      errors.phone = "Invalid Phone Number";
     }
-    if (alternatePhone && !phonePattern.test(alternatePhone)) {
-      errors.alternatePhone = "Phone number must contain exactly 10 digits.";
+    const altPhoneRes = validateIndianPhone(editForm.alternatePhone);
+    if (editForm.alternatePhone && !altPhoneRes.isValid) {
+      errors.alternatePhone = "Invalid Phone Number";
     }
-    if (phone && alternatePhone && phone === alternatePhone) {
+    const p1 = phoneRes.nationalNumber || (editForm.phone ? String(editForm.phone).replace(/\D/g, "").slice(-10) : "");
+    const p2 = altPhoneRes.nationalNumber || (editForm.alternatePhone ? String(editForm.alternatePhone).replace(/\D/g, "").slice(-10) : "");
+    if (p1 && p2 && p1 === p2) {
       errors.alternatePhone = "Alternate phone must be different from phone";
     }
 
@@ -363,8 +365,8 @@ const UsersList = () => {
         firstName: editForm.firstName.trim(),
         lastName: editForm.lastName.trim(),
         email: editForm.email.trim().toLowerCase(),
-        phone: editForm.phone.trim(),
-        alternatePhone: editForm.alternatePhone.trim(),
+        phone: phoneRes.normalized || "",
+        alternatePhone: altPhoneRes.normalized || "",
         designation: editForm.designation.trim(),
         branch: editForm.branch.trim(),
         region: editForm.region.trim(),
@@ -1204,9 +1206,9 @@ const UsersList = () => {
                             name="phone"
                             value={editForm.phone}
                             onChange={handleEditChange}
-                            placeholder="9876543210"
-                            inputMode="numeric"
-                            maxLength={10}
+                            placeholder="9876543210 or +91 98765 43210"
+                            inputMode="tel"
+                            maxLength={16}
                             className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 outline-none transition focus:border-blue-600"
                           />
                           {editErrors.phone && (
@@ -1229,9 +1231,9 @@ const UsersList = () => {
                             name="alternatePhone"
                             value={editForm.alternatePhone}
                             onChange={handleEditChange}
-                            placeholder="9876543211"
-                            inputMode="numeric"
-                            maxLength={10}
+                            placeholder="9876543211 or +91 98765 43211"
+                            inputMode="tel"
+                            maxLength={16}
                             className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 outline-none transition focus:border-blue-600"
                           />
                           {editErrors.alternatePhone && (
@@ -1255,7 +1257,7 @@ const UsersList = () => {
                             value={editForm.designation}
                             onChange={handleEditChange}
                             list="edit-designation-options"
-                            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 outline-none transition focus:border-blue-600"
+                            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 outline-none transition focus:border-blue-600 no-datalist-arrow"
                           />
                           <datalist id="edit-designation-options">
                             {lookupDesignations.map((item) => (
@@ -1301,7 +1303,7 @@ const UsersList = () => {
                             value={editForm.region}
                             onChange={handleEditChange}
                             list="edit-region-options"
-                            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 outline-none transition focus:border-blue-600"
+                            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 outline-none transition focus:border-blue-600 no-datalist-arrow"
                           />
                           <datalist id="edit-region-options">
                             {lookupRegions.map((item) => (

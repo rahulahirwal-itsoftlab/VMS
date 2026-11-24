@@ -30,7 +30,7 @@ const INVOICE_STATUS_OPTIONS = [
 const PAYMENT_STATUS_OPTIONS = ["", "UNPAID", "PARTIALLY_PAID", "PAID"];
 
 const statusLabel = (s) => {
-  if (!s) return "All Statuses";
+  if (!s) return "All Status";
   const map = {
     PENDING_THREE_WAY_MATCH: "PENDING THREE-WAY MATCH",
     PENDING_ADMIN_REVIEW:    "Pending Admin Review",
@@ -247,14 +247,14 @@ const InvoiceReport = () => {
             value={filters.status}
             onChange={(nextValue) => updateFilter("status", nextValue)}
             options={INVOICE_STATUS_OPTIONS.map((s) => ({ value: s, label: statusLabel(s) }))}
-            placeholder="All Statuses"
+            placeholder="All Status"
             className="w-full sm:w-56"
           />
           <FilterSelect
             value={filters.paymentStatus}
             onChange={(nextValue) => updateFilter("paymentStatus", nextValue)}
-            options={PAYMENT_STATUS_OPTIONS.map((s) => ({ value: s, label: s || "All Payment Statuses" }))}
-            placeholder="All Payment Statuses"
+            options={PAYMENT_STATUS_OPTIONS.map((s) => ({ value: s, label: s || "All Payment Status" }))}
+            placeholder="All Payment Status"
             className="w-full sm:w-56"
           />
           {/* Overdue toggle */}

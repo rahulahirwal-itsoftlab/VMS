@@ -2,8 +2,19 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
+  LayoutDashboard,
+  Receipt,
+  FileBarChart2,
+  History,
+  Bell,
+  Users,
+  ShoppingCart,
+  ClipboardCheck,
+  GitCompare,
+  Wallet,
 } from "lucide-react";
 
+import LogoIcon from "../common/LogoIcon";
 import { navigation } from "../../constants/navigation";
 import { hasPermission } from "../../config/permissions";
 import { useAuth } from "../../context/AuthContext";
@@ -11,6 +22,150 @@ import { useNotifications } from "../../context/NotificationContext";
 import { useSidebar } from "../../context/SidebarContext";
 import SidebarItem from "./SidebarItem";
 import { formatRoleLabel } from "../../utils/displayFormatters";
+
+const SUPER_ADMIN_NAVIGATION = [
+  {
+    section: "MAIN",
+    items: [
+      {
+        title: "Dashboard",
+        icon: LayoutDashboard,
+        path: "/dashboard",
+      },
+    ],
+  },
+  {
+    section: "PROCUREMENT",
+    items: [
+      {
+        title: "Invoices",
+        icon: Receipt,
+        path: "/invoices",
+        activePaths: ["/invoices"],
+      },
+      {
+        title: "Reports",
+        icon: FileBarChart2,
+        path: "/super-admin/reports",
+        activePaths: [
+          "/super-admin/reports",
+          "/super-admin/reports/vendors",
+          "/super-admin/reports/purchase-orders",
+          "/super-admin/reports/invoices",
+          "/super-admin/reports/payments",
+        ],
+      },
+      {
+        title: "Audit Logs",
+        icon: History,
+        path: "/audit-logs",
+        activePaths: ["/audit-logs"],
+      },
+      {
+        title: "Notifications",
+        icon: Bell,
+        path: "/notifications",
+        activePaths: ["/notifications"],
+      },
+      {
+        title: "Users",
+        icon: Users,
+        path: "/users",
+        activePaths: ["/users", "/users/create"],
+      },
+    ],
+  },
+];
+
+const CASE_MANAGER_NAVIGATION = [
+  {
+    section: "MAIN",
+    items: [
+      {
+        title: "Dashboard",
+        icon: LayoutDashboard,
+        path: "/dashboard",
+      },
+    ],
+  },
+  {
+    section: "PROCUREMENT",
+    items: [
+      {
+        title: "Vendors",
+        icon: LogoIcon,
+        path: "/vendors",
+        activePaths: ["/vendors"],
+      },
+      {
+        title: "Purchase Orders",
+        icon: ShoppingCart,
+        path: "/purchase-orders",
+        activePaths: ["/purchase-orders"],
+      },
+      {
+        title: "Receipt Documents",
+        icon: ClipboardCheck,
+        path: "/receipt-documents",
+        activePaths: ["/receipt-documents"],
+      },
+      {
+        title: "Invoices",
+        icon: Receipt,
+        path: "/invoices",
+        activePaths: ["/invoices"],
+      },
+      {
+        title: "Three-Way Matching",
+        icon: GitCompare,
+        path: "/three-way-matching",
+        activePaths: ["/three-way-matching"],
+      },
+      {
+        title: "Payments",
+        icon: Wallet,
+        path: "/payments",
+        activePaths: ["/payments", "/payment-history"],
+      },
+      {
+        title: "Notifications",
+        icon: Bell,
+        path: "/notifications",
+        activePaths: ["/notifications"],
+      },
+    ],
+  },
+];
+
+const TEAM_LEAD_NAVIGATION = [
+  {
+    section: "MAIN",
+    items: [
+      {
+        title: "Dashboard",
+        icon: LayoutDashboard,
+        path: "/dashboard",
+      },
+    ],
+  },
+  {
+    section: "PROCUREMENT",
+    items: [
+      {
+        title: "Payment Approvals",
+        icon: Wallet,
+        path: "/approvals",
+        activePaths: ["/approvals", "/payment-approvals"],
+      },
+      {
+        title: "Notifications",
+        icon: Bell,
+        path: "/notifications",
+        activePaths: ["/notifications"],
+      },
+    ],
+  },
+];
 
 const Sidebar = () => {
   const {
@@ -22,10 +177,21 @@ const Sidebar = () => {
   const { user } = useAuth();
   const { unreadCount } = useNotifications();
 
-  const filteredNavigation = navigation
-    .map((section) => ({
-      ...section,
-      items: section.items.filter((item) => {
+  const isSuperAdmin = user?.role === "SUPER_ADMIN";
+  const isCaseManager = user?.role === "CASE_MANAGER";
+  const isTeamLead = user?.role === "TEAM_LEAD";
+
+  const getNavigationSections = () => {
+    if (isSuperAdmin) return SUPER_ADMIN_NAVIGATION;
+    if (isCaseManager) return CASE_MANAGER_NAVIGATION;
+    if (isTeamLead) return TEAM_LEAD_NAVIGATION;
+
+    const sections = [];
+    let currentSection = null;
+
+    for (const rawSection of navigation) {
+      const sectionTitle = rawSection.section;
+      const filteredItems = rawSection.items.filter((item) => {
         if (item.title === "Three-Way Matching" && user?.role === "SUPER_ADMIN") {
           return false;
         }
@@ -34,9 +200,31 @@ const Sidebar = () => {
           (!item.allowedRoles || item.allowedRoles.includes(user?.role)) &&
           !item.excludedRoles?.includes(user?.role)
         );
-      }),
-    }))
-    .filter((section) => section.items.length > 0);
+      });
+
+      if (filteredItems.length === 0) continue;
+
+      if (sectionTitle) {
+        currentSection = {
+          section: sectionTitle,
+          items: [...filteredItems],
+        };
+        sections.push(currentSection);
+      } else if (currentSection) {
+        currentSection.items.push(...filteredItems);
+      } else {
+        currentSection = {
+          section: "PROCUREMENT",
+          items: [...filteredItems],
+        };
+        sections.push(currentSection);
+      }
+    }
+
+    return sections;
+  };
+
+  const currentNavigation = getNavigationSections();
 
   const compact = collapsed && !mobileOpen;
 
@@ -77,11 +265,11 @@ const Sidebar = () => {
               <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 border-2 border-white dark:border-slate-900 animate-pulse" />
             </div>
 
-            <div className="min-w-0">
-              <h1 className="truncate text-base font-extrabold text-slate-900 dark:text-white font-heading tracking-wide">
+            <div className="min-w-0 flex flex-col justify-center">
+              <h1 className="truncate text-base font-extrabold leading-tight text-slate-900 dark:text-white font-heading tracking-wide">
                 VMS Portal
               </h1>
-              <p className="truncate text-[11px] font-bold text-[#0090B8] dark:text-[#00E5FF]">
+              <p className="truncate text-[11px] font-bold leading-normal text-[#0090B8] dark:text-[#00E5FF]">
                 Enterprise Suite
               </p>
             </div>
@@ -108,20 +296,20 @@ const Sidebar = () => {
 
         {/* Animated Menu Navigation */}
         <nav className="min-h-0 flex-1 overflow-hidden overflow-y-auto custom-scrollbar px-3 py-4" aria-label="Sidebar menu">
-          <div className="space-y-5">
-            {filteredNavigation.map((section, index) => (
+          <div className="space-y-6">
+            {currentNavigation.map((section, index) => (
               <section key={section.section || `section-${index}`}>
                 {section.section && !compact && (
-                  <h2 className="mb-2.5 px-3 text-xs font-black uppercase tracking-[0.2em] text-[#0090B8] dark:text-[#00E5FF] font-heading drop-shadow-2xs">
+                  <h2 className="mb-3 px-3.5 text-xs font-black uppercase tracking-[0.2em] text-[#0090B8] dark:text-[#00E5FF] font-heading drop-shadow-2xs">
                     {section.section}
                   </h2>
                 )}
 
-                <div className="space-y-1">
+                <div className="flex flex-col gap-3">
                   {section.items.map((item) => (
                     <SidebarItem
-                      badge={item.path === "/notifications" ? notificationBadge : item.badge}
                       activePaths={item.activePaths}
+                      badge={item.path === "/notifications" ? notificationBadge : item.badge}
                       icon={item.icon}
                       key={item.pathByRole?.[user?.role] || item.path}
                       onNavigate={closeMobileSidebar}
@@ -138,7 +326,7 @@ const Sidebar = () => {
         {/* Animated Profile Footer with Soft Lift & Glass Card */}
         <div className="shrink-0 border-t border-sky-200/60 dark:border-slate-800/80 p-3 bg-sky-100/40 dark:bg-slate-900/60 backdrop-blur-md">
           {!compact && user && (
-            <div className="group mb-2 flex items-center gap-3 rounded-2xl border border-sky-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-800/80 p-2.5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-[#0090B8]/40">
+            <div className="group flex items-center gap-3 rounded-2xl border border-sky-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-800/80 p-2.5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-[#0090B8]/40">
               <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-[#0090B8] to-sky-400 text-white font-extrabold text-sm shadow-md shadow-sky-500/20 group-hover:scale-105 transition-transform">
                 {profileName.charAt(0).toUpperCase()}
                 <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 border-2 border-white dark:border-slate-900" />

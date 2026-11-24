@@ -436,7 +436,14 @@ class VendorService {
       ...buildCreatedAtRange(query),
       ...buildVendorStatusFilter(query.status),
       ...(query.category && { category: query.category }),
-      ...(user.role === ROLES.CASE_MANAGER && { created_by_id: user.id }),
+      ...(user.role === ROLES.CASE_MANAGER && !query.all && {
+        OR: [
+          { created_by_id: user.id },
+          { is_active: true },
+          { status: VENDOR_STATUS.ACTIVE },
+          { approval_status: VENDOR_APPROVAL_STATUS.APPROVED },
+        ],
+      }),
       ...(query.search && {
         OR: [
           { name: { contains: query.search, mode: 'insensitive' } },
@@ -489,9 +496,7 @@ class VendorService {
       throw new ApiError(404, VENDOR_MESSAGES.NOT_FOUND);
     }
 
-    if (user.role === ROLES.CASE_MANAGER && vendor.created_by_id !== user.id) {
-      throw new ApiError(403, 'You can only access vendors created by you.');
-    }
+
 
     return {
       ...vendor,

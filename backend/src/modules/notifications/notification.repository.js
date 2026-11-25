@@ -6,7 +6,11 @@ class NotificationRepository {
    */
   async create(data, tx = null) {
     const client = tx || prisma;
-    return client.notification.create({ data });
+    const finalData = {
+      ...data,
+      org_id: data.org_id || 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c',
+    };
+    return client.notification.create({ data: finalData });
   }
 
   /**
@@ -14,7 +18,11 @@ class NotificationRepository {
    */
   async createMany(notifications, tx = null) {
     const client = tx || prisma;
-    return client.notification.createMany({ data: notifications });
+    const finalData = notifications.map((n) => ({
+      ...n,
+      org_id: n.org_id || 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c',
+    }));
+    return client.notification.createMany({ data: finalData });
   }
 
   /**

@@ -15,5 +15,10 @@ export const sanitizeUser = (user) => {
     [UserEntity.columns.ACTIVATION_TOKEN_HASH]: _____,
     ...sanitized
   } = user;
+
+  const orgId = sanitized.org_id || sanitized.OrgID || user.org_id || user.OrgID || null;
+  sanitized.org_id = orgId;
+  sanitized.OrgID = orgId;
+
   return sanitized;
 };

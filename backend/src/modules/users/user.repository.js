@@ -30,6 +30,15 @@ const AUTH_USER_SELECT = {
   [UserEntity.columns.CREDENTIALS_EMAIL_SENT_AT]: true,
   [UserEntity.columns.FAILED_LOGIN_ATTEMPTS]: true,
   [UserEntity.columns.LOCKED_UNTIL]: true,
+  [UserEntity.columns.ORG_ID]: true,
+  org: {
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      is_active: true,
+    },
+  },
 };
 
 class UserRepository {
@@ -64,9 +73,10 @@ class UserRepository {
   /**
    * Fetch all users with filters, search, paginated metadata, and column sorting.
    */
-  buildListWhere({ search, role, status, branch, region, designation } = {}) {
+  buildListWhere({ search, role, status, branch, region, designation, org_id } = {}) {
     return {
       [UserEntity.columns.DELETED_AT]: null,
+      ...(org_id && { [UserEntity.columns.ORG_ID]: org_id }),
       ...(role && { [UserEntity.columns.ROLE]: role }),
       ...(status && { [UserEntity.columns.STATUS]: status }),
       ...(branch && { [UserEntity.columns.BRANCH]: { equals: branch, mode: 'insensitive' } }),
@@ -156,6 +166,14 @@ class UserRepository {
           [UserEntity.columns.CREDENTIALS_EMAIL_STATUS]: true,
           [UserEntity.columns.CREDENTIALS_EMAIL_SENT_AT]: true,
           [UserEntity.columns.CREATED_AT]: true,
+          [UserEntity.columns.ORG_ID]: true,
+          org: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
         },
       }),
       prisma.user.count({ where }),
@@ -185,6 +203,16 @@ class UserRepository {
         where: {
           [UserEntity.columns.ID]: id,
           [UserEntity.columns.DELETED_AT]: null,
+        },
+        include: {
+          org: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              is_active: true,
+            },
+          },
         },
       })
     );

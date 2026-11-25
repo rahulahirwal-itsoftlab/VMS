@@ -60,7 +60,7 @@ const buildPoolConfig = () => {
     statement_timeout: parsePositiveInt(process.env.DB_STATEMENT_TIMEOUT_MS, 30000),
     keepAlive: process.env.DB_KEEP_ALIVE !== 'false',
     keepAliveInitialDelayMillis: parsePositiveInt(process.env.DB_KEEP_ALIVE_DELAY_MS, 5000),
-    allowExitOnIdle: true,
+    allowExitOnIdle: false,
     ...(isNeonHost ? { ssl: { rejectUnauthorized: false } } : {}),
   };
 };
@@ -134,13 +134,53 @@ if (!pool.__vmsEventsAttached) {
 
 const adapter = globalForPrisma.__vmsAdapter ?? new PrismaPg(pool);
 
-const prisma = globalForPrisma.__vmsPrisma ?? new PrismaClient({
+const basePrisma = globalForPrisma.__vmsPrismaBase ?? new PrismaClient({
   adapter,
   log: NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
 });
 
+const prisma = globalForPrisma.__vmsPrisma ?? basePrisma.$extends({
+  result: {
+    org: {
+      OrgID: { needs: { id: true }, compute(o) { return o.id; } },
+      org_id: { needs: { id: true }, compute(o) { return o.id; } },
+    },
+    user: {
+      OrgID: { needs: { org_id: true }, compute(u) { return u.org_id; } },
+    },
+    vendor: {
+      OrgID: { needs: { org_id: true }, compute(v) { return v.org_id; } },
+    },
+    purchaseOrder: {
+      OrgID: { needs: { org_id: true }, compute(po) { return po.org_id; } },
+    },
+    goodsReceiptNote: {
+      OrgID: { needs: { org_id: true }, compute(g) { return g.org_id; } },
+    },
+    deliveryChallan: {
+      OrgID: { needs: { org_id: true }, compute(d) { return d.org_id; } },
+    },
+    invoice: {
+      OrgID: { needs: { org_id: true }, compute(i) { return i.org_id; } },
+    },
+    payment: {
+      OrgID: { needs: { org_id: true }, compute(p) { return p.org_id; } },
+    },
+    auditLog: {
+      OrgID: { needs: { org_id: true }, compute(a) { return a.org_id; } },
+    },
+    notification: {
+      OrgID: { needs: { org_id: true }, compute(n) { return n.org_id; } },
+    },
+    threeWayMatch: {
+      OrgID: { needs: { org_id: true }, compute(m) { return m.org_id; } },
+    },
+  },
+});
+
 globalForPrisma.__vmsPgPool = pool;
 globalForPrisma.__vmsAdapter = adapter;
+globalForPrisma.__vmsPrismaBase = basePrisma;
 globalForPrisma.__vmsPrisma = prisma;
 
 const dbConfig = {

@@ -48,6 +48,7 @@ class ReportService {
 
     const where = {
       deleted_at: null,
+      ...(query.org_id && { org_id: query.org_id }),
       ...buildDateRange('created_at', query.startDate, query.endDate),
       ...(query.status && (normalizeVendorStatusFilter(query.status) || { status: query.status })),
       ...(query.category && { category: query.category }),
@@ -118,7 +119,7 @@ class ReportService {
    */
   async getVendorReportSummary(query) {
     const dateFilter = buildDateRange('created_at', query.startDate, query.endDate);
-    const baseWhere  = { deleted_at: null };
+    const baseWhere  = { deleted_at: null, ...(query.org_id && { org_id: query.org_id }) };
 
     const [
       totalAll,
@@ -157,6 +158,7 @@ class ReportService {
     const skip  = (page - 1) * limit;
 
     const where = {
+      ...(query.org_id && { org_id: query.org_id }),
       ...buildDateRange('order_date', query.startDate, query.endDate),
       ...(query.status   && { status:    query.status }),
       ...(query.vendorId && { vendor_id: query.vendorId }),
@@ -228,6 +230,7 @@ class ReportService {
 
   async getPOReportSummary(query) {
     const where = {
+      ...(query.org_id && { org_id: query.org_id }),
       ...buildDateRange('order_date', query.startDate, query.endDate),
     };
 
@@ -270,6 +273,7 @@ class ReportService {
     const now = new Date();
     const where = {
       deleted_at: null,
+      ...(query.org_id && { org_id: query.org_id }),
       ...buildDateRange('invoice_date', query.startDate, query.endDate),
       ...(query.status        && { status:         query.status }),
       ...(query.paymentStatus && { payment_status: query.paymentStatus }),
@@ -354,6 +358,7 @@ class ReportService {
     const now = new Date();
     const where = {
       deleted_at: null,
+      ...(query.org_id && { org_id: query.org_id }),
       ...buildDateRange('invoice_date', query.startDate, query.endDate),
     };
 
@@ -408,6 +413,7 @@ class ReportService {
     const skip  = (page - 1) * limit;
 
     const where = {
+      ...(query.org_id && { org_id: query.org_id }),
       ...buildDateRange('payment_date', query.startDate, query.endDate),
       ...(query.status        && { status:          query.status }),
       ...(query.paymentMethod && { payment_method:  query.paymentMethod }),
@@ -496,6 +502,7 @@ class ReportService {
 
   async getPaymentReportSummary(query) {
     const where = {
+      ...(query.org_id && { org_id: query.org_id }),
       ...buildDateRange('payment_date', query.startDate, query.endDate),
     };
 

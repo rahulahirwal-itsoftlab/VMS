@@ -37,8 +37,12 @@ class MatchingRepository {
    * Create a new ThreeWayMatch record.
    */
   async create(data) {
+    const finalData = {
+      ...data,
+      org_id: data.org_id || 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c',
+    };
     return prisma.threeWayMatch.create({
-      data,
+      data: finalData,
       include: {
         invoice:        { include: { vendor: true, purchase_order: true } },
         purchase_order: true,

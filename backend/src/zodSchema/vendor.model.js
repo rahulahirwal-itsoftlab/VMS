@@ -20,6 +20,8 @@ export const VENDOR_COLUMNS = {
   DELETED_AT: 'deleted_at',
   CREATED_AT: 'created_at',
   UPDATED_AT: 'updated_at',
+  ORG_ID: 'org_id',
+  OrgID: 'org_id',
 };
 
 export const VendorEntity = {

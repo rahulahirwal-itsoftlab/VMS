@@ -19,7 +19,11 @@ const VENDOR_DOCUMENT_TYPES = [
   { type: "ADDITIONAL_DOCUMENT", label: "Additional Document" },
 ];
 
-const API_ORIGIN = "http://localhost:5000";
+const API_ORIGIN =
+  import.meta.env.VITE_API_ORIGIN ||
+  (import.meta.env.VITE_API_URL
+    ? new URL(import.meta.env.VITE_API_URL).origin
+    : "http://localhost:5001");
 const ACCEPTED_FILE_TYPES = ".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg";
 
 const formatSize = (bytes = 0) => {

@@ -36,6 +36,10 @@ const classifyDatabaseError = (error) => {
   const message = `${error?.message || ''} ${error?.cause?.message || ''}`;
   const lowerMessage = message.toLowerCase();
 
+  if (code === '53000' || lowerMessage.includes('exceeded the quota') || lowerMessage.includes('quota exceeded')) {
+    return 'DATABASE_QUOTA_EXCEEDED';
+  }
+
   if (code === 'DATABASE_URL_MISSING') {
     return 'DATABASE_URL_MISSING';
   }

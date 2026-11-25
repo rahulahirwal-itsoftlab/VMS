@@ -112,10 +112,12 @@ class AuthService {
 
     const idField = UserEntity.columns.ID;
     const roleField = UserEntity.columns.ROLE;
+    const orgId = user[UserEntity.columns.ORG_ID] || user.org_id || user.OrgID || 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c';
 
     const { accessToken, refreshToken } = generateAuthTokens(
       user[idField],
       user[roleField],
+      { org_id: orgId, OrgID: orgId },
     );
 
     await userRepository.updateUser(user[idField], {
@@ -370,7 +372,8 @@ class AuthService {
       [UserEntity.columns.LOCKED_UNTIL]: null,
     });
 
-    const { accessToken, refreshToken } = generateAuthTokens(updatedUser.id, updatedUser.role);
+    const userOrgId = updatedUser.org_id || updatedUser.OrgID || 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c';
+    const { accessToken, refreshToken } = generateAuthTokens(updatedUser.id, updatedUser.role, { org_id: userOrgId, OrgID: userOrgId });
     await userRepository.updateUser(updatedUser.id, {
       [UserEntity.columns.REFRESH_TOKEN]: refreshToken,
       [UserEntity.columns.LAST_LOGIN_AT]: now,

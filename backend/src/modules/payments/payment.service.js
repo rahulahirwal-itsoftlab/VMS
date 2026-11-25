@@ -693,9 +693,12 @@ class PaymentService {
 
       const currency = payload.currency || invoice.currency || 'INR';
 
+      const effectivePaymentOrgId = payload.org_id || payload.OrgID || invoice.org_id || user?.org_id || user?.OrgID || 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c';
+
       const payment = await tx.payment.create({
         data: {
           payment_number: paymentNumber,
+          org_id: effectivePaymentOrgId,
           invoice_id: payload.invoiceId,
           vendor_id: invoice.vendor_id,
           purchase_order_id: invoice.purchase_order_id,
@@ -936,6 +939,11 @@ class PaymentService {
     }
 
     const conditions = [];
+
+    const effectivePaymentOrgId = (user?.role === ROLES.SUPER_ADMIN && query.org_id) ? query.org_id : (user?.org_id || user?.OrgID);
+    if (effectivePaymentOrgId) {
+      conditions.push({ org_id: effectivePaymentOrgId });
+    }
 
     if (user.role === ROLES.CASE_MANAGER) {
       conditions.push({ created_by_id: user.id });

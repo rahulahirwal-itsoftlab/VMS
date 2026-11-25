@@ -115,6 +115,10 @@ class AuditService {
       : null;
 
     const andFilters = [];
+    const effectiveOrgId = (actor?.role === ROLES.SUPER_ADMIN && query.org_id) ? query.org_id : (actor?.org_id || actor?.OrgID);
+    if (effectiveOrgId) {
+      andFilters.push({ org_id: effectiveOrgId });
+    }
     if (financeHeadScope) andFilters.push(financeHeadScope);
     if (query.status) {
       andFilters.push({

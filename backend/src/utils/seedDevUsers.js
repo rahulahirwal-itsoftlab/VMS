@@ -111,6 +111,7 @@ const seedDevUsers = async () => {
           [UserEntity.columns.STATUS]: USER_ACCOUNT_STATUS.ACTIVE,
           [UserEntity.columns.ACTIVATED_AT]: now,
           [UserEntity.columns.PASSWORD_SET_AT]: now,
+          [UserEntity.columns.ORG_ID]: 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c',
         })
       );
 

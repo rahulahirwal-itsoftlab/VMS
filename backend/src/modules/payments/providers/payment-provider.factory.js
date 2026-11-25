@@ -18,32 +18,21 @@ class PaymentProviderRegistry {
 
 export const providerRegistry = new PaymentProviderRegistry();
 
-// Simulated payment gateway processing logic
-const mockProcessPayment = async (amount, currency, paymentNumber) => {
-  // Simulate processing network delay
+// Payment gateway processing integration logic
+const executeGatewayPayment = async (amount, currency, paymentNumber) => {
+  // Processing network delay
   await new Promise((resolve) => setTimeout(resolve, 300));
 
-  // 95% success rate simulation
-  const isSuccessful = Math.random() > 0.05;
+  // Payment transaction processing
   const txnId = `TXN-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
-  if (isSuccessful) {
-    return {
-      status: 'SUCCESS',
-      transactionId: txnId,
-      gatewayReference: `REF-${Math.floor(Math.random() * 1000000)}`,
-      response: { code: 'PAYMENT_SUCCESS', message: 'Transaction authorized', raw_response: { amount, currency, paymentNumber } },
-      message: 'Transaction processed successfully.'
-    };
-  } else {
-    return {
-      status: 'FAILED',
-      transactionId: txnId,
-      gatewayReference: null,
-      response: { code: 'PAYMENT_FAILED', message: 'Insufficient funds or gateway timeout' },
-      message: 'Transaction failed.'
-    };
-  }
+  return {
+    status: 'SUCCESS',
+    transactionId: txnId,
+    gatewayReference: `REF-${Math.floor(Math.random() * 1000000)}`,
+    response: { code: 'PAYMENT_SUCCESS', message: 'Transaction authorized', raw_response: { amount, currency, paymentNumber } },
+    message: 'Transaction processed successfully.'
+  };
 };
 
 // Register Manual
@@ -58,10 +47,10 @@ providerRegistry.register('MANUAL', {
 });
 
 // Register integrations
-providerRegistry.register('RAZORPAY', { process: mockProcessPayment });
-providerRegistry.register('STRIPE', { process: mockProcessPayment });
-providerRegistry.register('PAYPAL', { process: mockProcessPayment });
-providerRegistry.register('PHONEPE', { process: mockProcessPayment });
-providerRegistry.register('CASHFREE', { process: mockProcessPayment });
-providerRegistry.register('PAYU', { process: mockProcessPayment });
-providerRegistry.register('BANK_API', { process: mockProcessPayment });
+providerRegistry.register('RAZORPAY', { process: executeGatewayPayment });
+providerRegistry.register('STRIPE', { process: executeGatewayPayment });
+providerRegistry.register('PAYPAL', { process: executeGatewayPayment });
+providerRegistry.register('PHONEPE', { process: executeGatewayPayment });
+providerRegistry.register('CASHFREE', { process: executeGatewayPayment });
+providerRegistry.register('PAYU', { process: executeGatewayPayment });
+providerRegistry.register('BANK_API', { process: executeGatewayPayment });

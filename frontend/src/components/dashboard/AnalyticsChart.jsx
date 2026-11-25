@@ -9,18 +9,8 @@ import {
   Tooltip,
 } from "recharts";
 
-const defaultData = [
-  { month: "Jan", po: 25 },
-  { month: "Feb", po: 40 },
-  { month: "Mar", po: 35 },
-  { month: "Apr", po: 55 },
-  { month: "May", po: 48 },
-  { month: "Jun", po: 70 },
-  { month: "Jul", po: 82 },
-];
-
 const AnalyticsChart = ({
-  data = defaultData,
+  data = [],
   dataKey = "po",
   categoryKey = "month",
   color = "#2563EB",

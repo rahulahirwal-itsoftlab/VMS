@@ -112,7 +112,8 @@ const mapVendorData = (data, userId, vendorCode) => ({
   status: VENDOR_STATUS.PENDING,
   approval_status: VENDOR_APPROVAL_STATUS.PENDING_APPROVAL,
   is_active: false,
-  created_by_id: userId,
+  created_by_id: typeof user === 'string' ? user : user?.id,
+  org_id: data.org_id || data.OrgID || (typeof user === 'object' ? (user?.org_id || user?.OrgID) : null) || 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c',
 });
 
 const VENDOR_TRANSITIONS = {
@@ -431,8 +432,12 @@ class VendorService {
   async listVendors(query, user) {
     const page = Number(query.page || 1);
     const limit = Number(query.limit || 10);
+    const effectiveOrgId = (user?.role === ROLES.SUPER_ADMIN && query.org_id) ? query.org_id : (user?.org_id || user?.OrgID);
+    const orgFilter = effectiveOrgId ? { org_id: effectiveOrgId } : {};
+
     const where = {
       deleted_at: null,
+      ...orgFilter,
       ...buildCreatedAtRange(query),
       ...buildVendorStatusFilter(query.status),
       ...(query.category && { category: query.category }),
@@ -462,10 +467,11 @@ class VendorService {
     });
 
     const [pending, approved, rejected, blocked] = await Promise.all([
-      prisma.vendor.count({ where: { deleted_at: null, status: VENDOR_STATUS.PENDING } }),
+      prisma.vendor.count({ where: { deleted_at: null, ...orgFilter, status: VENDOR_STATUS.PENDING } }),
       prisma.vendor.count({
         where: {
           deleted_at: null,
+          ...orgFilter,
           status: VENDOR_STATUS.ACTIVE,
           approval_status: VENDOR_APPROVAL_STATUS.APPROVED,
           is_active: true,
@@ -474,11 +480,12 @@ class VendorService {
       prisma.vendor.count({
         where: {
           deleted_at: null,
+          ...orgFilter,
           status: VENDOR_STATUS.INACTIVE,
           approval_status: VENDOR_APPROVAL_STATUS.REJECTED,
         },
       }),
-      prisma.vendor.count({ where: { deleted_at: null, status: VENDOR_STATUS.BLOCKED } }),
+      prisma.vendor.count({ where: { deleted_at: null, ...orgFilter, status: VENDOR_STATUS.BLOCKED } }),
     ]);
 
     return {

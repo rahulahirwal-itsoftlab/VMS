@@ -5,6 +5,7 @@ import {
   clearAuthSession,
   getAccessToken,
   getRefreshToken,
+  getStoredUser,
   updateStoredTokens,
 } from "../services/authSession";
 
@@ -12,7 +13,7 @@ const API_BASE_URL =
   import.meta.env.VITE_API_URL ||
   import.meta.env.VITE_API_BASE_URL ||
   (import.meta.env.DEV
-    ? "http://localhost:5000/api"
+    ? "http://localhost:5001/api"
     : "https://vms-5rht.onrender.com/api");
 
 export class AuthRequiredError extends Error {
@@ -124,6 +125,11 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
+    const storedUser = getStoredUser();
+    const orgId = storedUser?.org_id || storedUser?.OrgID;
+    if (orgId) {
+      config.headers["X-Org-ID"] = orgId;
+    }
   }
 
   return config;

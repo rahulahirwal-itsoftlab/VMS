@@ -28,20 +28,32 @@ export const hashToken = (token) => {
  * @param {string} role - User role for RBAC.
  * @returns {object} Object containing accessToken and refreshToken.
  */
-export const generateAuthTokens = (userId, role) => {
+export const generateAuthTokens = (userId, role, extra = {}) => {
   const idField = UserEntity.columns.ID;
   const roleField = UserEntity.columns.ROLE;
   const permissions = getPermissionsForRole(role);
+  const orgId = extra.org_id || extra.OrgID || extra.orgId;
+
+  const payload = {
+    [idField]: userId,
+    [roleField]: role,
+    permissions,
+    ...(orgId ? { org_id: orgId, OrgID: orgId } : {}),
+  };
 
   const accessToken = jwt.sign(
-    { [idField]: userId, [roleField]: role, permissions },
+    payload,
     ACCESS_TOKEN_SECRET,
     { expiresIn: ACCESS_TOKEN_EXPIRY },
   );
 
-  const refreshToken = jwt.sign({ [idField]: userId }, REFRESH_TOKEN_SECRET, {
-    expiresIn: REFRESH_TOKEN_EXPIRY,
-  });
+  const refreshToken = jwt.sign(
+    { [idField]: userId, ...(orgId ? { org_id: orgId, OrgID: orgId } : {}) },
+    REFRESH_TOKEN_SECRET,
+    {
+      expiresIn: REFRESH_TOKEN_EXPIRY,
+    },
+  );
 
   return { accessToken, refreshToken };
 };

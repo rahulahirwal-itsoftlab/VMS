@@ -77,6 +77,16 @@ export const protect = async (req, res, next) => {
         status: true,
         deleted_at: true,
         must_change_password: true,
+        org_id: true,
+        org: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            is_active: true,
+            deleted_at: true,
+          },
+        },
       },
     }), { attempts: 5, baseDelayMs: 500, maxDelayMs: 3000 });
 
@@ -93,7 +103,18 @@ export const protect = async (req, res, next) => {
       throw new ApiError(403, 'Password change is required before accessing VMS.');
     }
 
-    // Attach full user context to the request object.
+    if (user.org && (!user.org.is_active || user.org.deleted_at !== null)) {
+      throw new ApiError(403, 'Your organization account is inactive or disabled. Contact system administration.');
+    }
+
+    const defaultOrgId = 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c';
+    const baseOrgId = user.org_id || decoded?.org_id || decoded?.OrgID || defaultOrgId;
+    const requestedOrgId = req.headers['x-org-id'] || req.headers['x-organization-id'];
+
+    // Only SUPER_ADMIN can switch organization via header
+    const effectiveOrgId = (user.role === 'SUPER_ADMIN' && requestedOrgId) ? requestedOrgId : baseOrgId;
+
+    // Attach full user and organization context to the request object.
     req.user = {
       id: user.id,
       email: user.email,
@@ -103,7 +124,13 @@ export const protect = async (req, res, next) => {
       last_name: user.last_name,
       status: user.status || 'ACTIVE',
       must_change_password: user.must_change_password,
+      org_id: effectiveOrgId,
+      OrgID: effectiveOrgId,
+      org: user.org || { id: effectiveOrgId, name: 'ACRE India Pvt Ltd', code: 'ACRE_INDIA' },
     };
+
+    req.orgId = effectiveOrgId;
+    req.OrgID = effectiveOrgId;
 
     next();
   } catch (error) {

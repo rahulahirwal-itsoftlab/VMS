@@ -7,6 +7,7 @@ import {
   Moon,
   ChevronDown,
   LogOut,
+  Building2,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
@@ -222,6 +223,10 @@ const Navbar = () => {
               <div className="border-b border-slate-100 dark:border-slate-800 px-3 py-2.5">
                 <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{displayName}</p>
                 <p className="text-[11px] text-slate-400">{user?.email}</p>
+                <div className="mt-1 flex items-center gap-1.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                  <Building2 size={12} className="text-[#0090B8] shrink-0" />
+                  <span className="truncate">{user?.org?.name || user?.organization_name || "ACRE India Pvt Ltd"}</span>
+                </div>
               </div>
 
               <button

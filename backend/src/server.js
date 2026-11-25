@@ -12,7 +12,7 @@ import {
 } from './config/prisma.js';
 import { classifyDatabaseError, isTransientDatabaseError, toSafeErrorLog } from './utils/dbRetry.js';
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 let server;
 
 const STARTUP_DATABASE_ERROR_CATEGORIES = new Set([
@@ -20,6 +20,7 @@ const STARTUP_DATABASE_ERROR_CATEGORIES = new Set([
   'DATABASE_CONNECTION_REFUSED',
   'DATABASE_DNS_FAILURE',
   'DATABASE_HOST_UNREACHABLE',
+  'DATABASE_QUOTA_EXCEEDED',
 ]);
 
 const describeStartupError = (error) => {
@@ -30,6 +31,14 @@ const describeStartupError = (error) => {
       category,
       label: category === 'DATABASE_URL_MISSING' ? 'Database URL missing' : 'Database URL invalid',
       detail: 'DATABASE_URL is missing or invalid. Fix the sanitized startup details before retrying.',
+    };
+  }
+
+  if (category === 'DATABASE_QUOTA_EXCEEDED') {
+    return {
+      category,
+      label: 'Database quota exceeded',
+      detail: 'PostgreSQL account or compute quota exceeded. Upgrade plan or switch credentials to resume normal database operations.',
     };
   }
 
@@ -125,6 +134,17 @@ const startServer = async () => {
 
   const listen = (startupMode = 'ready') => {
     server = http.createServer(app);
+
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
+        console.error(`\n[startup] Port ${PORT} is not available (${err.code}).`);
+        console.error(`[startup] It is either already in use or restricted by the OS.`);
+        console.error(`[startup] Fix: Change PORT in backend/.env (e.g. PORT=5001 or PORT=5002) and update frontend/.env accordingly.\n`);
+      } else {
+        console.error('[startup] HTTP server error:', err.message);
+      }
+      shutdown('PORT_LISTEN_ERROR');
+    });
 
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));

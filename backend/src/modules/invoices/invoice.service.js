@@ -828,9 +828,11 @@ class InvoiceService {
         deliveryChallanId: deliveryChallan.id,
         itemCount: verifiedLineItems.length,
       });
+      const effectiveInvoiceOrgId = payload.org_id || payload.OrgID || user?.org_id || user?.OrgID || 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c';
       let invoice = await tx.invoice.create({
         data: {
           invoice_number:        invoiceNum,
+          org_id:                effectiveInvoiceOrgId,
 
           vendor_id:             vendorId,
           purchase_order_id:     effectivePurchaseOrderId,
@@ -1085,9 +1087,11 @@ class InvoiceService {
   async listInvoices(query, user) {
     const page  = Number(query.page  || 1);
     const limit = Number(query.limit || 10);
+    const effectiveOrgId = (user?.role === ROLES.SUPER_ADMIN && query.org_id) ? query.org_id : (user?.org_id || user?.OrgID);
 
     const where = {
       deleted_at: null, // Always exclude soft-deleted invoices
+      ...(effectiveOrgId          && { org_id:                effectiveOrgId }),
       ...(query.vendorId          && { vendor_id:             query.vendorId }),
       ...(query.purchaseOrderId   && { purchase_order_id:     query.purchaseOrderId }),
       ...(query.requiredApprovalRole && { required_approval_role: query.requiredApprovalRole }),
@@ -1147,6 +1151,12 @@ class InvoiceService {
     if (!invoice) throw new ApiError(404, 'Invoice not found.');
     if (invoice.deleted_at && user.role !== ROLES.SUPER_ADMIN && user.role !== ROLES.FINANCE_HEAD) {
       throw new ApiError(404, 'Invoice not found.');
+    }
+    if (user?.role !== ROLES.SUPER_ADMIN) {
+      const userOrgId = user?.org_id || user?.OrgID;
+      if (invoice.org_id && userOrgId && invoice.org_id !== userOrgId) {
+        throw new ApiError(403, 'Access denied. You do not have permission to view invoices from another organization.');
+      }
     }
     return buildInvoiceDetailPayload(invoice);
   }

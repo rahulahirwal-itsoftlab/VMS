@@ -952,6 +952,12 @@ const UsersList = () => {
                         </h4>
                         <div className="grid grid-cols-1 gap-3">
                           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                            <span className="font-medium">Organization</span>
+                            <span className="text-slate-950 font-semibold">
+                              {selectedUser.org?.name || selectedUser.organization_name || "ACRE India Pvt Ltd"}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                             <span className="font-medium">Employee ID</span>
                             <span className="text-slate-950 font-semibold">
                               {selectedUser.employeeId || "-"}

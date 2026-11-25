@@ -24,6 +24,14 @@ const router = express.Router();
 // All report routes require authentication
 router.use(protect);
 
+router.use((req, res, next) => {
+  const effectiveOrgId = (req.user?.role === 'SUPER_ADMIN' && req.query.org_id) ? req.query.org_id : (req.user?.org_id || req.user?.OrgID);
+  if (effectiveOrgId) {
+    req.query.org_id = effectiveOrgId;
+  }
+  next();
+});
+
 // ─── Vendor Reports ────────────────────────────────────────────────────────────
 router.get(
   '/vendors',

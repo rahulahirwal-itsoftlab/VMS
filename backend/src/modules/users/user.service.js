@@ -233,12 +233,16 @@ class UserService {
           [UserEntity.columns.MUST_CHANGE_PASSWORD]: true,
           [UserEntity.columns.TEMPORARY_PASSWORD_EXPIRES_AT]: temporaryPasswordExpiresAt,
           [UserEntity.columns.CREDENTIALS_EMAIL_STATUS]: 'PENDING',
+          [UserEntity.columns.ORG_ID]: userData.org_id || userData.OrgID || requester?.org_id || requester?.OrgID || 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c',
         },
       });
+
+      const effectiveUserOrgId = userData.org_id || userData.OrgID || requester?.org_id || requester?.OrgID || 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c';
 
       // Write audit log in the same transaction context
       await tx.auditLog.create({
         data: {
+          org_id: effectiveUserOrgId,
           entity_type: 'user',
           entity_id: user.id,
           action: 'user_created',

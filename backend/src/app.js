@@ -24,6 +24,7 @@ import matchingRoutes from './modules/three-way-matching/matching.routes.js';
 import reportRoutes from './modules/reports/report.routes.js';
 import lookupRoutes from './modules/lookups/lookup.routes.js';
 import healthRoutes from './modules/health/health.routes.js';
+import orgRoutes from './modules/orgs/org.routes.js';
 
 import ApiError from './utils/ApiError.js';
 import sanitizeObject from './utils/logSanitizer.js';
@@ -78,7 +79,7 @@ app.use(cors({
   },
   credentials:     true,
   methods:         ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders:  ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'x-request-id'],
+  allowedHeaders:  ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'x-request-id', 'X-Org-ID', 'x-org-id'],
   optionsSuccessStatus: 200,
 }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
@@ -154,6 +155,8 @@ app.use('/api/v1/notifications',      notificationRoutes);
 app.use('/api/v1/three-way-matching', matchingRoutes);
 app.use('/api/v1/reports',           reportRoutes);
 app.use('/api/v1/lookups',           lookupRoutes);
+app.use('/api/v1/orgs',              orgRoutes);
+app.use('/api/v1/organizations',      orgRoutes);
 
 // ─── 6. 404 Handler ───────────────────────────────────────────────────────────
 app.use((req, _res, next) => {

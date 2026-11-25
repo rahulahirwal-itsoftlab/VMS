@@ -31,3 +31,12 @@ export {
   deleteVendorSchema,
   searchVendorsSchema,
 } from './vendor.schema.js';
+
+// Export Org Entity & Schemas
+export {
+  ORG_TABLE,
+  ORG_COLUMNS,
+  OrgEntity,
+  createOrgSchema,
+  updateOrgSchema,
+} from './org.model.js';

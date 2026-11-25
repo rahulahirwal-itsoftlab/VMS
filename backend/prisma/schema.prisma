@@ -6,6 +6,44 @@ datasource db {
   provider = "postgresql"
 }
 
+model Org {
+  id                       String                   @id @default(uuid())
+  name                     String
+  code                     String?                  @unique
+  description              String?
+  is_active                Boolean                  @default(true)
+  created_at               DateTime                 @default(now())
+  updated_at               DateTime                 @updatedAt
+  deleted_at               DateTime?
+  users                    User[]
+  vendors                  Vendor[]
+  vendor_documents         VendorDocument[]
+  purchase_orders          PurchaseOrder[]
+  goods_receipt_notes      GoodsReceiptNote[]
+  goods_receipt_items      GoodsReceiptItem[]
+  delivery_challans        DeliveryChallan[]
+  delivery_challan_items   DeliveryChallanItem[]
+  invoices                 Invoice[]
+  invoice_attachments      InvoiceAttachment[]
+  ocr_documents            OCRDocument[]
+  ocr_extractions          OCRExtraction[]
+  ocr_extraction_items     OCRExtractionItem[]
+  ocr_invoice_drafts       OCRInvoiceDraft[]
+  three_way_matches        ThreeWayMatch[]
+  payments                 Payment[]
+  installments             Installment[]
+  payments_old             PaymentOld[]
+  audit_logs               AuditLog[]
+  approval_logs            ApprovalLog[]
+  notifications            Notification[]
+  payment_approvals        PaymentApproval[]
+  payment_approval_history PaymentApprovalHistory[]
+  user_sessions            UserSession[]
+
+  @@map("orgs")
+}
+
+
 model User {
   id                             String                   @id @default(uuid())
   email                          String                   @unique
@@ -86,6 +124,9 @@ model User {
   vendors_approved               Vendor[]                 @relation("VendorApprovedBy")
   vendors_created                Vendor[]                 @relation("VendorCreatedBy")
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([employee_id])
   @@index([deleted_by_id])
   @@index([activation_token_hash])
@@ -156,6 +197,9 @@ model Vendor {
   approved_by                    User?               @relation("VendorApprovedBy", fields: [approved_by_id], references: [id])
   created_by                     User?               @relation("VendorCreatedBy", fields: [created_by_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([status])
   @@index([approval_status])
   @@index([pending_change_status])
@@ -184,6 +228,9 @@ model VendorDocument {
   uploaded_by        User?     @relation("VendorDocumentUploadedBy", fields: [uploaded_by_id], references: [id])
   vendor             Vendor    @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([vendor_id])
   @@index([document_type])
   @@index([uploaded_by_id])
@@ -238,6 +285,9 @@ model PurchaseOrder {
   vendor                      Vendor                @relation(fields: [vendor_id], references: [id])
   three_way_matches           ThreeWayMatch[]
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([vendor_id])
   @@index([status])
   @@map("purchase_orders")
@@ -285,6 +335,9 @@ model GoodsReceiptNote {
   ocr_invoice_drafts  OCRInvoiceDraft[]
   three_way_matches   ThreeWayMatch[]
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([vendor_id])
   @@index([purchase_order_id])
   @@index([delivery_challan_id])
@@ -310,6 +363,9 @@ model GoodsReceiptItem {
   goods_receipt_note    GoodsReceiptNote @relation(fields: [goods_receipt_note_id], references: [id], onDelete: Cascade)
   purchase_order        PurchaseOrder    @relation(fields: [purchase_order_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([goods_receipt_note_id])
   @@index([purchase_order_id])
   @@map("goods_receipt_items")
@@ -354,6 +410,9 @@ model DeliveryChallan {
   ocr_invoice_drafts      OCRInvoiceDraft[]
   three_way_matches       ThreeWayMatch[]
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([vendor_id])
   @@index([purchase_order_id])
   @@index([status])
@@ -377,6 +436,9 @@ model DeliveryChallanItem {
   delivery_challan    DeliveryChallan @relation(fields: [delivery_challan_id], references: [id], onDelete: Cascade)
   purchase_order      PurchaseOrder   @relation(fields: [purchase_order_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([delivery_challan_id])
   @@index([purchase_order_id])
   @@map("delivery_challan_items")
@@ -461,6 +523,9 @@ model Invoice {
   payments_old               PaymentOld?
   three_way_matches          ThreeWayMatch[]
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([status])
   @@index([vendor_id])
   @@index([purchase_order_id])
@@ -496,6 +561,9 @@ model InvoiceAttachment {
   uploaded_by             User?         @relation("InvoiceAttachmentUploadedBy", fields: [uploaded_by_id], references: [id])
   vendor                  Vendor        @relation(fields: [vendor_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([invoice_id])
   @@index([purchase_order_id])
   @@index([vendor_id])
@@ -533,6 +601,9 @@ model OCRDocument {
   extractions             OCRExtraction[]
   invoice_drafts          OCRInvoiceDraft[]
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([uploaded_by_id])
   @@index([invoice_id])
   @@index([purchase_order_id])
@@ -602,6 +673,9 @@ model OCRExtraction {
   created_by              User?               @relation("OCRExtractionCreatedBy", fields: [created_by_id], references: [id])
   ocr_document            OCRDocument         @relation(fields: [ocr_document_id], references: [id], onDelete: Cascade)
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@unique([ocr_document_id, extraction_version])
   @@index([ocr_document_id])
   @@index([created_by_id])
@@ -637,6 +711,9 @@ model OCRExtractionItem {
   updated_at        DateTime      @updatedAt
   ocr_extraction    OCRExtraction @relation(fields: [ocr_extraction_id], references: [id], onDelete: Cascade)
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([ocr_extraction_id])
   @@index([line_number])
   @@map("ocr_extraction_items")
@@ -678,6 +755,9 @@ model OCRInvoiceDraft {
   selected_delivery_challan    DeliveryChallan?  @relation(fields: [selected_delivery_challan_id], references: [id])
   selected_grn                 GoodsReceiptNote? @relation(fields: [selected_grn_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([created_by_id])
   @@index([ocr_document_id])
   @@index([invoice_id])
@@ -734,6 +814,9 @@ model ThreeWayMatch {
   invoice                   Invoice           @relation(fields: [invoice_id], references: [id])
   purchase_order            PurchaseOrder     @relation(fields: [purchase_order_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([invoice_id])
   @@index([purchase_order_id])
   @@index([grn_id])
@@ -783,6 +866,9 @@ model Payment {
   updated_by               User?             @relation("PaymentUpdatedBy", fields: [updated_by_id], references: [id])
   vendor                   Vendor            @relation(fields: [vendor_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([status])
   @@index([approval_status])
   @@index([invoice_id])
@@ -808,6 +894,9 @@ model Installment {
   purchase_order     PurchaseOrder @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
   payments           Payment[]
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@unique([purchase_order_id, installment_number])
   @@index([purchase_order_id])
   @@index([status])
@@ -838,6 +927,9 @@ model PaymentOld {
   invoice        Invoice   @relation(fields: [invoice_id], references: [id])
   rejected_by    User?     @relation("PaymentOldRejectedBy", fields: [rejected_by_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@map("payments_old")
 }
 
@@ -857,6 +949,9 @@ model AuditLog {
   created_at      DateTime @default(now())
   performed_by    User?    @relation("AuditLogPerformedBy", fields: [performed_by_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([entity_type, entity_id])
   @@index([performed_by_id])
   @@index([created_at])
@@ -875,6 +970,9 @@ model ApprovalLog {
   created_at      DateTime @default(now())
   performed_by    User?    @relation("ApprovalLogPerformedBy", fields: [performed_by_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([entity_type, entity_id])
   @@index([performed_by_id])
   @@map("approval_logs")
@@ -895,6 +993,9 @@ model Notification {
   reference_id String?
   user         User      @relation("NotificationRecipient", fields: [user_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([user_id, is_read])
   @@index([user_id, created_at])
   @@index([role, is_read])
@@ -937,6 +1038,9 @@ model PaymentApproval {
   three_way_match    ThreeWayMatch?           @relation(fields: [three_way_match_id], references: [id])
   vendor             Vendor                   @relation(fields: [vendor_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([payment_id])
   @@index([approver_id, status])
   @@index([invoice_id])
@@ -959,6 +1063,9 @@ model PaymentApprovalHistory {
   payment_approval    PaymentApproval @relation(fields: [payment_approval_id], references: [id], onDelete: Cascade)
   performed_by        User?           @relation("PaymentApprovalHistoryPerformedBy", fields: [performed_by_id], references: [id])
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([payment_approval_id])
   @@index([payment_id])
   @@index([created_at])
@@ -978,6 +1085,9 @@ model UserSession {
   ip_address  String?
   user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
+  org_id                         String?                  @map("org_id")
+  org                            Org?                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  @@index([org_id])
   @@index([user_id])
   @@index([token_hash])
   @@index([expires_at])

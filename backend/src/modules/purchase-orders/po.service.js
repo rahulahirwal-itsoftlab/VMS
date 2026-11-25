@@ -336,11 +336,18 @@ class PurchaseOrderService {
       const poNumber = await generatePoNumber();
 
       const created = await purchaseOrderRepository.transaction(async (tx) => {
+        const effectiveOrgId = payload.org_id || payload.OrgID || user?.org_id || user?.OrgID || 'e0a1b2c3-d4e5-4f6a-8b9c-0d1e2f3a4b5c';
+        const installmentsWithOrg = preparedInstallments.map((inst) => ({
+          ...inst,
+          org_id: effectiveOrgId,
+        }));
+
         const po = await tx.purchaseOrder.create({
           data: {
             po_number: poNumber,
             vendor_id: payload.vendorId,
             created_by_id: user.id,
+            org_id: effectiveOrgId,
             amount: taxCalculation.summary.grandTotal,
             currency,
             description: payload.description || null,
@@ -360,8 +367,8 @@ class PurchaseOrderService {
             requester: payload.requester || null,
             buyer: payload.buyer || null,
             quotation_date: payload.quotationDate ? new Date(payload.quotationDate) : null,
-            installments: preparedInstallments.length > 0 ? {
-              create: preparedInstallments,
+            installments: installmentsWithOrg.length > 0 ? {
+              create: installmentsWithOrg,
             } : undefined,
           },
           include: {
@@ -386,8 +393,11 @@ class PurchaseOrderService {
   async listPurchaseOrders(query, user) {
     const page = Number(query.page || 1);
     const limit = Number(query.limit || 10);
+    const effectiveOrgId = (user?.role === ROLES.SUPER_ADMIN && query.org_id) ? query.org_id : (user?.org_id || user?.OrgID);
+
     const where = {
       deleted_at: null,
+      ...(effectiveOrgId && { org_id: effectiveOrgId }),
       ...(query.status && { status: query.status }),
       ...(query.vendorId && { vendor_id: query.vendorId }),
       ...(user.role === ROLES.CASE_MANAGER && { created_by_id: user.id }),
@@ -417,6 +427,12 @@ class PurchaseOrderService {
     }
     if (purchaseOrder.deleted_at) {
       throw new ApiError(404, 'Purchase order not found.');
+    }
+    if (user?.role !== ROLES.SUPER_ADMIN) {
+      const userOrgId = user?.org_id || user?.OrgID;
+      if (purchaseOrder.org_id && userOrgId && purchaseOrder.org_id !== userOrgId) {
+        throw new ApiError(403, 'Access denied. You do not have permission to view purchase orders from another organization.');
+      }
     }
 
     return purchaseOrder;

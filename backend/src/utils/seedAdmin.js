@@ -3,7 +3,10 @@ import userRepository from "../modules/users/user.repository.js";
 import { ROLES, UserEntity } from "../zodSchema/index.js";
 
 const DEFAULT_PASSWORD =
-  process.env.DEFAULT_DEV_PASSWORD || "Admin@123";
+  process.env.DEV_SEED_PASSWORD ||
+  process.env.SUPER_ADMIN_PASSWORD ||
+  process.env.DEFAULT_DEV_PASSWORD ||
+  "Admin@123";
 
 const USERS = [
   {
@@ -50,6 +53,8 @@ const seedAdmin = async () => {
 
       const hashedPassword = await bcrypt.hash(DEFAULT_PASSWORD, 10);
 
+      const now = new Date();
+
       await userRepository.createUser({
         [UserEntity.columns.EMAIL]: user.email,
         [UserEntity.columns.PASSWORD]: hashedPassword,
@@ -57,6 +62,8 @@ const seedAdmin = async () => {
         [UserEntity.columns.FIRST_NAME]: user.firstName,
         [UserEntity.columns.LAST_NAME]: user.lastName,
         [UserEntity.columns.STATUS]: "ACTIVE",
+        [UserEntity.columns.ACTIVATED_AT]: now,
+        [UserEntity.columns.PASSWORD_SET_AT]: now,
       });
 
       console.log(`✔ ${user.role} created.`);
